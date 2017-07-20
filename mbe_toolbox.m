@@ -111,7 +111,7 @@ classdef mbe_toolbox
             
             % define photon energy and angles
             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
-            th = [0:0.005:4];
+            th = [0:0.005:4].';
 
             % define material (species, stoichiometry [per f.u.], density)
             layer(1) = define_material({'Ge'},[1,1]/2,5.323);
@@ -133,7 +133,7 @@ classdef mbe_toolbox
             % simulate and analyze
             % x = [thickness,filling,roughness,I0,background]
             nlayers = numel(layer);
-            simulate_ = @(x,method) evaluate_parratt(layer,th,hv,...
+            simulate_ = @(x,method) simulate_xrr(layer,th,hv,...
                 x(0*nlayers+[1:nlayers]),...
                 x(1*nlayers+[1:nlayers]),...
                 x(2*nlayers+[1:nlayers]),method)*x(end-1)+x(end);
@@ -142,11 +142,11 @@ classdef mbe_toolbox
 
             % exclude above noise floor
             ex_ = th<1.8; ex_ = th>0;
-            fourier_analyze_xrr(th(ex_),R_parratt(ex_),hv)
+            analyze_xrr_with_fft(th(ex_),R_parratt(ex_),hv)
             subplot(3,1,1); hold on; plot(th(ex_),R_transfer(ex_),'.r');
         end
-        
-        function [RR]    = evaluate_parratt(layer,th,hv,thickness,filling,roughness,method)
+
+        function [RR]    = simulate_xrr(layer,th,hv,thickness,filling,roughness,method)
             %
             % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
             % 
@@ -171,8 +171,7 @@ classdef mbe_toolbox
                     % number of layers
                     nlayers = numel(layer);
                     lambda = get_photon_wavelength(hv);
-                    th2kz = @(th,lambda) 4*pi/lambda .* sind(th(:));
-                    th2kx = @(th,lambda) 4*pi/lambda .* cosd(th(:));
+                    get_qx = @(th,hv) 4*pi/lambda*cosd(th);
 
                     % [nths,nlayers] get refractive index 
                     nths = numel(th); refractive_index = zeros(nths,nlayers);
@@ -187,9 +186,9 @@ classdef mbe_toolbox
                     % 1. k2  = (n2/n1) k1 ; equivalently, n1 sin(theta_1) = n2 sin(theta_2)
                     % 2. k1x = k2x  
                     kz = zeros(nths,nlayers);
-                    get_kz_in_layer = @(n1,n2,k1z,k1x) sqrt( (n2./n1).^2 .* k1z.^2 + ((n2./n1).^2-1).*k1x.^2 );
+                    get_kz_in_layer = @(n1,n2,k1z,k1x) sqrt( (n2./n1).^2 .* k1z.^2 + ((n2./n1).^2-1) .* k1x.^2 );
                     for i = 1:nlayers
-                        kz(:,i) = get_kz_in_layer(1,refractive_index(:,i),th2kz(th,lambda),th2kx(th,lambda));
+                        kz(:,i) = get_kz_in_layer(1,refractive_index(:,i),get_qz(th,hv),get_qx(th,hv));
                     end
 
                     % get transfer matricies R and T which describe propagation
@@ -219,13 +218,13 @@ classdef mbe_toolbox
                     RR = zeros(1,nths);
                     for j = 1:nths
                         % vacuum/first layer
-                        M =     get_transfer_matrix_at_interface(th2kz(th(j),lambda), kz(j,1), .5*roughness(1) );
-                        M = M * get_transfer_matrix_in_medium(                        kz(j,1), .5*thickness(1) );
+                        M =     get_transfer_matrix_at_interface(get_qz(th(j),hv), kz(j,1), .5*roughness(1) );
+                        M = M * get_transfer_matrix_in_medium(                     kz(j,1), .5*thickness(1) );
                         % first layer ... nth layer
                         if nlayers > 1
                             for i = 2:nlayers
-                                M = M * get_transfer_matrix_at_interface( kz(j,i-1) , kz(j,i), .5*roughness(i) );
-                                M = M * get_transfer_matrix_in_medium(                kz(j,i), .5*thickness(i) );
+                                M = M * get_transfer_matrix_at_interface( kz(j,i-1)  , kz(j,i), .5*roughness(i) );
+                                M = M * get_transfer_matrix_in_medium(                 kz(j,i), .5*thickness(i) );
                             end
                         end
                         RR(j) = abs(M(2,1)./M(1,1)).^2;
@@ -268,40 +267,38 @@ classdef mbe_toolbox
             end
         end
 
-        function           fourier_analyze_xrr(th,xrr,hv,thc)
+        function           analyze_xrr_with_fft(th,intensity,hv,thc)
             %
-            % beta = fourier_analyze_xrr(th,xrr,hv,thc)
+            % beta = analyze_xrr_with_fft(th,xrr,hv,thc)
             % 
-            % th     [deg]          incident x-ray angle
-            % xrr    [a.u.]         xrr intensity
-            % hv     [eV]           photon energy
-            % thc    [deg]          (optional) critical angle
+            % th         [deg]          incident x-ray angle
+            % xintensity [a.u.]         xrr intensity
+            % hv         [eV]           photon energy
+            % thc        [deg]          (optional) critical angle
             %
             % Example:
             % ex_ = th<1.8;
-            % fourier_analyze_xrr(th(ex_),intensity(ex_),hv,0.36)
-            % fourier_analyze_xrr(th(ex_),intensity(ex_),hv)
+            % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv,0.36)
+            % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv)
             %
 
             import mbe_toolbox.*
-            
-            lambda = get_photon_wavelength(hv);
 
             if nargin < 4
                 qc = [];
             else
-                qc = 4*pi/lambda*sind(thc);
+                qc = get_qz(thc,hv);
             end
 
-            qz = 4*pi/lambda*sind(th);
-
             % fft analysis
-            F = xrr;
+            F = intensity(:);
+            % get wavevector
+            qz = get_qz(th,hv);
             % subtract critical wavevector
             if isempty(qc); [~,c]=max(-diff(F)./diff(th)); qc = qz(c); end
-            q = sqrt(qz.^2 - qc.^2); Fq=F(q>0); q=q(q>0); nqs = numel(q); 
+            q = sqrt(qz.^2 - qc.^2); Fq=F(q>0); q=q(q>0); nqs = numel(q);
             % apply background correction
-            Fq= (Fq.*q.^4-mean(Fq.*q.^4)).'.*tukeywin(nqs,0.90);
+            Fq= (Fq.*q.^4-mean(Fq.*q.^4)).*tukeywin(nqs,0.90);
             % resample Fq and q using equidistant intervals
             Fq= interp1(q,Fq,linspace(min(q),max(q),nqs));
             q = linspace(min(q),max(q),nqs);
@@ -413,6 +410,14 @@ classdef mbe_toolbox
             
         end
 
+        function [qz]    = get_qz(th,hv)
+            
+            import mbe_toolbox.*
+            
+            qz = 4*pi/get_photon_wavelength(hv) * sind(th);
+            
+        end
+        
     end
     
     % materials-related things
