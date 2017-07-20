@@ -93,125 +93,76 @@ classdef mbe_toolbox
     
     methods (Static)
         
-        function [layer] = create_layer(thickness,filling,roughness,species,stoichiometry,density)
-
-            import mbe_toolbox.*
-
-            define_layer = @(thickness,filling,roughness,species,stoichiometry,density) ...
-                struct('thickness',thickness,'filling',filling,'roughness',roughness,...
-                'species',species,'Z',get_atomic_number(species),...
-                'stoichiometry',stoichiometry,'density',density);
-            layer = define_layer(thickness,filling,roughness,species,stoichiometry,density);
-            
-            % define layer basic properties
-            % get molecular weight [amu/f.u.] = [amu/atom * atom/f.u.]
-            layer.molecular_weight = sum(get_atomic_mass(layer.Z) .* layer.stoichiometry);
-            % atomic number density [atoms/nm^3]: (g/cm^3 * f.u./amu * atoms/f.u.) / (atoms/nm^3) = 602.24
-            layer.number_density = layer.density / layer.molecular_weight * 602.24;
-        end
-        
-        function [R]     = simulate_xray_reflectivity(layer,th,hv)
+        function           demo_simulate_xrr()
             %
-            % R = simulate_xray_reflectivity(layer,th)
+            % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
             % 
             % layers [struct]           layers
-            %    layer(i).d                 [nm]            thickness
-            %    layer(i).filling           [unitless]      filling
-            %    layer(i).roughness         [nm]            top layer roughness
-            %    layer(i).density           [g/cm^3]        mass density
+            %    layer(i).mass_density      [g/cm^3]        mass density
             %    layer(i).Z                 [Z]             atomic species
             %    layer(i).stoichiometry     [atoms/u.c.]    number of atoms per formula unit
-            % qz     [1/nm]             wavevectors
+            % th        [deg]           angles
+            % thickness [nm]            thickness
+            % filling   [unitless]      multiplies density
+            % roughness [nm]            inteface roughness
             % 
-            % example:
-            % %%
-            % clear;clc; import mbe_toolbox.*
-            % hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
-            % % thickness,filling,roughness,species,stoichiometry,density
-            % layer(1) = create_layer(  0,1,1,{'W'},[1],5);
-            % layer(2) = create_layer(1E3,1,0,{'Si'},[1],2.3290);
-            % layer(3) = create_layer( 50,1,1,{'C'},[1],5);
-            % 
-            % th = [0:0.01:4];
-            % R = simulate_xray_reflectivity(layer,th,hv)
-            % semilogy(th,R)
             
             import mbe_toolbox.*
             
-            
+            % define photon energy and angles
+            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
+            th = [0:0.005:4];
+
+            % define material (species, stoichiometry [per f.u.], density)
+            layer(1) = define_material({'Ge'},[1,1]/2,5.323);
+            layer(2) = define_material({'Si'},[1],2.53);
+
+            thickness = [50 1E3];
+            roughness = [0 0];
+            filling   = [1 1];
 
             % get dielectric contributions
             nlayers = numel(layer);
             for i = 1:nlayers
                 layer(i).delta = get_xray_dielectric_function_delta( ...
-                    layer(i).Z,layer(i).number_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv,th);
+                    layer(i).Z,layer(i).atomic_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv,th);
                 layer(i).beta  = get_xray_dielectric_function_beta(....
-                    layer(i).Z,layer(i).number_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv);
+                    layer(i).Z,layer(i).atomic_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv);
             end
-            
-            [RR] = evaliate_parratt(layer,th,hv)
-            
-            semilogy(th,R) 
-            %%
+
+            % simulate and analyze
+            % x = [thickness,filling,roughness,I0,background]
+            nlayers = numel(layer);
+            simulate_ = @(x,method) evaluate_parratt(layer,th,hv,...
+                x(0*nlayers+[1:nlayers]),...
+                x(1*nlayers+[1:nlayers]),...
+                x(2*nlayers+[1:nlayers]),method)*x(end-1)+x(end);
+            R_transfer = simulate_([thickness,filling,roughness,2,1E-3],1);
+            R_parratt  = simulate_([thickness,filling,roughness,2,1E-3],2);
+
+            % exclude above noise floor
+            ex_ = th<1.8; ex_ = th>0;
+            fourier_analyze_xrr(th(ex_),R_parratt(ex_),hv)
+            subplot(3,1,1); hold on; plot(th(ex_),R_transfer(ex_),'.r');
         end
         
-        function [RR] = evaliate_parratt(layer,th,hv,method)
-            % NOTE: SOMETHING IS WRONG HERE: FRINGES DON'T MATCH FFT
-            % NOTE: SOMETHING IS WRONG HERE: FRINGES DON'T MATCH FFT
-            % NOTE: SOMETHING IS WRONG HERE: FRINGES DON'T MATCH FFT
-            % NOTE: SOMETHING IS WRONG HERE: FRINGES DON'T MATCH FFT
-            % NOTE: SOMETHING IS WRONG HERE: FRINGES DON'T MATCH FFT
-
-            
-% clear;clc; import mbe_toolbox.*
-% hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
-% % thickness,filling,roughness,species,stoichiometry,density
-% layer(1) = create_layer(  50*(2*pi),1,0,{'Si'},[1], 20);
-% layer(2) = create_layer( 1E3,1,0,{'Si'},[1],1.5);
-% % layer(3) = create_layer(1E5,1,0.5,{'Si'},[1],2.3290);
-% 
-% 
-% qz = [0.001:0.001:10];
-% th = asind(get_photon_wavelength(hv)*qz/(4*pi));
-% 
-% % (4*pi)/get_photon_wavelength(hv)*[0:0.1:1]
-% 
-% % get dielectric contributions
-% nlayers = numel(layer);
-% for i = 1:nlayers
-%     layer(i).delta = get_xray_dielectric_function_delta( ...
-%         layer(i).Z,layer(i).number_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv,th);
-%     layer(i).beta  = get_xray_dielectric_function_beta(....
-%         layer(i).Z,layer(i).number_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv);
-% end
-% 
-% % layer(1).thickness =
-% 
-% R_parratt = evaliate_parratt(layer,th,hv,1);
-% R_transfer= evaliate_parratt(layer,th,hv,2);
-% 
-% % semilogy(th(:),R_parratt(:),'r',th(:),R_transfer(:),'.b')
-% 
-% % fft analysis
-% F = R_transfer;
-% [~,c]=max(-diff(F));
-% x = [0:1:100];
-% % q = sqrt(qz.^2 - qz(c).^2); F=F(q>0);q=q(q>0); 
-% q = qz;
-% nqs = numel(q); 
-% K = exp(-2i*pi*x(:).*q(:).');
-% Fx = (F.*q.^4-mean(F.*q.^4)).'.*tukeywin(nqs,0.90);
-% Fq = K*Fx;
-% subplot(3,1,1);
-% semilogy(q, F); 
-% subplot(3,1,2);
-% plot(q, Fx);
-% subplot(3,1,3);
-% plot(x, abs(Fq));
+        function [RR]    = evaluate_parratt(layer,th,hv,thickness,filling,roughness,method)
+            %
+            % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
+            % 
+            % layers [struct]           layers
+            %    layer(i).mass_density      [g/cm^3]        mass density
+            %    layer(i).Z                 [Z]             atomic species
+            %    layer(i).stoichiometry     [atoms/u.c.]    number of atoms per formula unit
+            % th        [deg]           angles
+            % thickness [nm]            thickness
+            % filling   [unitless]      multiplies density
+            % roughness [nm]            inteface roughness
+            % method    [1,2]           transfer matrix (explicit,slow), recursive parratt (default,fast)
             
             import mbe_toolbox.*
             
-            if nargin < 4
+            if nargin < 7
                 method = 2;
             end
 
@@ -228,7 +179,7 @@ classdef mbe_toolbox
                     get_n = @(delta,beta,atoms_per_nm3) 1 + atoms_per_nm3*(-delta-beta*1i);
                     for i = 1:nlayers
                         % get dielectric function
-                        refractive_index(:,i) = get_n(layer(i).delta,layer(i).beta,layer(i).filling);
+                        refractive_index(:,i) = get_n(layer(i).delta,layer(i).beta,filling(i));
                     end
 
                     % [nths,nlayers] solve wavevector boundary conditions to get
@@ -255,6 +206,7 @@ classdef mbe_toolbox
                     % T = subs(T,z,0)
                     % simplify
                     % T = simplify(expand(T));
+                    %
                     get_transfer_matrix_at_interface = @(k1,k2,sigma) [ ...
                         [ (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1), (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1)]
                         [ (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1), (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1)] ];
@@ -263,22 +215,17 @@ classdef mbe_toolbox
                             [ exp(-1i*k*l), 0]
                             [ 0, exp(+1i*k*l)]];
 
-                    % get reflection at each theta value
-                    RR = zeros(nths,1);
+                    % get reflection at each theta value; NOTE: A factor of .5 is required here for thickness and roughness to get curve from methods 1 and 2 to match.
+                    RR = zeros(1,nths);
                     for j = 1:nths
                         % vacuum/first layer
-                        % NOTE: SOMETHING IS WRONG HERE: FACTOR of 1/2 FOR ROUGHNESS AND THIKCNESS REQUIRED TO MATCH CASE 2
-                        % NOTE: SOMETHING IS WRONG HERE: FACTOR of 1/2 FOR ROUGHNESS AND THIKCNESS REQUIRED TO MATCH CASE 2
-                        % NOTE: SOMETHING IS WRONG HERE: FACTOR of 1/2 FOR ROUGHNESS AND THIKCNESS REQUIRED TO MATCH CASE 2
-                        % NOTE: SOMETHING IS WRONG HERE: FACTOR of 1/2 FOR ROUGHNESS AND THIKCNESS REQUIRED TO MATCH CASE 2
-                        % NOTE: SOMETHING IS WRONG HERE: FACTOR of 1/2 FOR ROUGHNESS AND THIKCNESS REQUIRED TO MATCH CASE 2
-                        M =     get_transfer_matrix_at_interface(th2kz(th(j),lambda), kz(j,1), .5*layer(1).roughness );
-                        M = M * get_transfer_matrix_in_medium(                        kz(j,1), .5*layer(1).thickness );
+                        M =     get_transfer_matrix_at_interface(th2kz(th(j),lambda), kz(j,1), .5*roughness(1) );
+                        M = M * get_transfer_matrix_in_medium(                        kz(j,1), .5*thickness(1) );
                         % first layer ... nth layer
                         if nlayers > 1
                             for i = 2:nlayers
-                                M = M * get_transfer_matrix_at_interface( kz(j,i-1) , kz(j,i), .5*layer(i).roughness );
-                                M = M * get_transfer_matrix_in_medium(                kz(j,i), .5*layer(i).thickness );
+                                M = M * get_transfer_matrix_at_interface( kz(j,i-1) , kz(j,i), .5*roughness(i) );
+                                M = M * get_transfer_matrix_in_medium(                kz(j,i), .5*thickness(i) );
                             end
                         end
                         RR(j) = abs(M(2,1)./M(1,1)).^2;
@@ -293,24 +240,24 @@ classdef mbe_toolbox
                     nths = numel(th); Q = zeros(nlayers,nths);
                     Q(1,:) = th2kz(th,lambda);
                     for j=1:nlayers
-                        Q(j+1,:)=sqrt(Q(1,:).^2 - 8.*(2*pi/lambda).^2*( layer(j).delta + 1i*layer(j).beta )*layer(j).filling );
+                        Q(j+1,:)=sqrt(Q(1,:).^2 - 2*(4*pi/lambda).^2*( layer(j).delta + 1i*layer(j).beta )*filling(j) );
                     end
                     %----- Reflection coefficients (no multiple scattering)
                     r = zeros(nlayers,nths);
                     for j=1:nlayers
-                        r(j,:)=(  (Q(j,:)-Q(j+1,:))./(Q(j,:)+Q(j+1,:)) ) .* exp(-0.5*(Q(j,:).*Q(j+1,:))*layer(j).roughness^2);
+                        r(j,:)=(  (Q(j,:)-Q(j+1,:))./(Q(j,:)+Q(j+1,:)) ) .* exp(-0.5*(Q(j,:).*Q(j+1,:))*roughness(j)^2);
                     end
                     %----- Reflectivity
                     R = zeros(nlayers-1,nths);
                     if nlayers>1
-                        R(1,:) =  (r(nlayers-1,:)  + r(nlayers,:) .* exp(1i*Q(nlayers,:)*layer(nlayers-1).thickness) ) ...
-                              ./(1+r(nlayers-1,:) .* r(nlayers,:) .* exp(1i*Q(nlayers,:)*layer(nlayers-1).thickness) );
+                        R(1,:) =  (r(nlayers-1,:)  + r(nlayers,:) .* exp(1i*Q(nlayers,:)*thickness(nlayers-1)) ) ...
+                              ./(1+r(nlayers-1,:) .* r(nlayers,:) .* exp(1i*Q(nlayers,:)*thickness(nlayers-1)) );
                     end
                     if nlayers>2
-                        for j=2:nlayers-1
-                            R(j,:)=  (r(nlayers-j,:) +R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*layer(nlayers-j).thickness) ) ...
-                                 ./(1+r(nlayers-j,:).*R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*layer(nlayers-j).thickness) );
-                        end
+                    for j=2:nlayers-1
+                        R(j,:) =  (r(nlayers-j,:)  + R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*thickness(nlayers-j)) ) ...
+                              ./(1+r(nlayers-j,:) .* R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*thickness(nlayers-j)) );
+                    end
                     end
                     %------ Intensity reflectivity
                     if nlayers==1
@@ -321,6 +268,58 @@ classdef mbe_toolbox
             end
         end
 
+        function           fourier_analyze_xrr(th,xrr,hv,thc)
+            %
+            % beta = fourier_analyze_xrr(th,xrr,hv,thc)
+            % 
+            % th     [deg]          incident x-ray angle
+            % xrr    [a.u.]         xrr intensity
+            % hv     [eV]           photon energy
+            % thc    [deg]          (optional) critical angle
+            %
+            % Example:
+            % ex_ = th<1.8;
+            % fourier_analyze_xrr(th(ex_),intensity(ex_),hv,0.36)
+            % fourier_analyze_xrr(th(ex_),intensity(ex_),hv)
+            %
+
+            import mbe_toolbox.*
+            
+            lambda = get_photon_wavelength(hv);
+
+            if nargin < 4
+                qc = [];
+            else
+                qc = 4*pi/lambda*sind(thc);
+            end
+
+            qz = 4*pi/lambda*sind(th);
+
+            % fft analysis
+            F = xrr;
+            % subtract critical wavevector
+            if isempty(qc); [~,c]=max(-diff(F)./diff(th)); qc = qz(c); end
+            q = sqrt(qz.^2 - qc.^2); Fq=F(q>0); q=q(q>0); nqs = numel(q); 
+            % apply background correction
+            Fq= (Fq.*q.^4-mean(Fq.*q.^4)).'.*tukeywin(nqs,0.90);
+            % resample Fq and q using equidistant intervals
+            Fq= interp1(q,Fq,linspace(min(q),max(q),nqs));
+            q = linspace(min(q),max(q),nqs);
+            % evalute DFT
+            x  = [0:0.5:200]; 
+            K  = exp(-1i*x(:).*q(:).');
+            Fx = K*Fq(:);
+            % evaluate FFT
+            nxs=2^10;
+            x_fft = [0:nxs-1]/(nxs)/(q(2)-q(1))*pi*2; x_fft = x_fft([1:floor(nxs/2)]);
+            F_fft = fft(Fq,2^10);                     F_fft = F_fft([1:floor(nxs/2)]);
+            % plot th, Fx, and Fq
+            subplot(3,1,1); semilogy(th, F); xlabel('\theta [deg]'); ylabel('Intensity [a.u.]'); axis tight;
+            subplot(3,1,2); plot(q, Fq); xlabel('(q^2 - q_c^2)^{1/2} [1/nm]'); ylabel('Intensity [a.u.]'); axis tight;
+            subplot(3,1,3); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200])
+
+        end
+        
         function [thc]   = get_xray_critical_angle(delta)
             %
             % thc = photoabsorbtion_crosssection(Z,lambda)
@@ -336,14 +335,14 @@ classdef mbe_toolbox
             
         end
         
-        function [delta] = get_xray_dielectric_function_delta(Z,n,hv,th)
+        function [delta] = get_xray_dielectric_function_delta(Z,atomic_density,hv,th)
             %
             % delta = get_xray_dielectric_function_delta(Z,lambda)
             % 
-            % delta  [unitless]     delta contribution to real part of dielectric function (n = 1 - delta + i beta)
-            % Z      [Z]            list of atomic numbers
-            % n      [atoms/nm^3]   list of atomic number density
-            % hv     [eV]           photon energy
+            % delta          [unitless]     delta contribution to real part of dielectric function (n = 1 - delta + i beta)
+            % Z              [Z]            list of atomic numbers
+            % atomic_density [atoms/nm^3]   list of atomic density
+            % hv             [eV]           photon energy
             %
             % Conversion factor = 
             %       (1/nm^3 ) * nm * nm^2 = 1
@@ -356,18 +355,18 @@ classdef mbe_toolbox
             
             f0 = get_atomic_form_factor(Z,th,hv); % [nZs,nhvs,nths]
             [f1,~] = get_atomic_anomalous_scattering_factor(Z,hv); % [nZs,nhvs,nths]
-            delta = mbe_toolbox.r_0/(2*pi) .* get_photon_wavelength(hv).^2 .* sum((f0+f1).*n(:),1);
+            delta = mbe_toolbox.r_0/(2*pi) .* get_photon_wavelength(hv).^2 .* sum((f0+f1).*atomic_density(:),1);
             delta = permute(delta,[2,3,1]); % [nhvs,nths]
         end
 
-        function [beta]  = get_xray_dielectric_function_beta(Z,n,hv)
+        function [beta]  = get_xray_dielectric_function_beta(Z,atomic_density,hv)
             %
             % beta = get_xray_dielectric_function_beta(Z,lambda) [nhvs,nths]
             % 
-            % beta   [unitless]     beta contribution to imaginary part of dielectric function (n = 1 - delta + i beta)
-            % Z      [Z]            list of atomic numbers
-            % n      [atoms/nm^3]   list of atomic number density
-            % hv     [eV]           photon energy
+            % beta           [unitless]     beta contribution to imaginary part of dielectric function (n = 1 - delta + i beta)
+            % Z              [Z]            list of atomic numbers
+            % atomic_density [atoms/nm^3]   list of atomic number density
+            % hv             [eV]           photon energy
             %
             % Conversion factor = 
             %       (1/nm^3 ) * nm * nm^2 = 1
@@ -388,7 +387,7 @@ classdef mbe_toolbox
             import mbe_toolbox.*
             
             [~,f2] = get_atomic_anomalous_scattering_factor(Z,hv); % [nZs,nhvs,nths]
-            beta = mbe_toolbox.r_0/(2*pi) .* get_photon_wavelength(hv).^2 .* sum(f2.*n(:),1);
+            beta = mbe_toolbox.r_0/(2*pi) .* get_photon_wavelength(hv).^2 .* sum(f2.*atomic_density(:),1);
             beta = permute(beta,[2,3,1]); % [nhvs,nths]
             
             % this is equivalent:
@@ -398,25 +397,48 @@ classdef mbe_toolbox
 
         end
 
-        function [mu]    = get_xray_linear_absorbtion_coeffcient(Z,n,hv)
+        function [mu]    = get_xray_linear_absorbtion_coeffcient(Z,atomic_density,hv)
             %
             % mu = get_xray_linear_absorbtion_coeffcient(Z,n,hv)
             % 
-            % mu     [1/nm]         atomic linear absorbtion coefficient
-            % Z      [Z]            list of atomic numbers
-            % n      [atoms/nm^3]   list of atomic number density
-            % hv     [eV]           photon energy
+            % mu             [1/nm]         atomic linear absorbtion coefficient
+            % Z              [Z]            list of atomic numbers
+            % atomic_density [atoms/nm^3]   list of atomic number density
+            % hv             [eV]           photon energy
             %
 
             import mbe_toolbox.*
             
-            mu = (4*pi) * get_xray_dielectric_function_beta(Z,n,hv) / get_photon_wavelength(hv);
+            mu = (4*pi) * get_xray_dielectric_function_beta(Z,atomic_density,hv) / get_photon_wavelength(hv);
             
+        end
+
+    end
+    
+    % materials-related things
+    
+    methods (Static)
+        
+        function [layer] = define_material(species,stoichiometry,mass_density)
+
+            import mbe_toolbox.*
+
+            define_layer = @(species,stoichiometry,mass_density) struct(...
+                'species',{species},'Z',get_atomic_number(species),...
+                'stoichiometry',stoichiometry,'mass_density',mass_density);
+            layer = define_layer(species,stoichiometry,mass_density);
+            
+            % define layer basic properties
+            % get molecular weight [amu/f.u.] = [amu/atom * atom/f.u.]
+            layer.molecular_weight = sum(get_atomic_mass(layer.Z) .* layer.stoichiometry);
+            % atomic density [atoms/nm^3]: (g/cm^3 * f.u./amu * atoms/f.u.) / (atoms/nm^3) = 602.24
+            layer.atomic_density = layer.mass_density / layer.molecular_weight * 602.24;
+
         end
         
     end
     
-    % periodic table related things
+    % atom-related things
     
     methods (Static)
         
@@ -712,7 +734,7 @@ classdef mbe_toolbox
             % hv = get_xray_energy(Z,emission_line)
             % 
             % hv            [eV]           energy
-            % Z             [e/cm3]        e- density 
+            % Z             [Z]            atomic number
             % emission_line [string]       Ka1, Ka2, Kb1, La1, La2, Lb1, Lb2, Lg1
             %
             % J. A. Bearden, Reviews of Modern Physics 39, 78 (1967).
