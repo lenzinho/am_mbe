@@ -145,7 +145,17 @@ classdef mbe_toolbox
             analyze_xrr_with_fft(th(ex_),R_parratt(ex_),hv)
             subplot(3,1,1); hold on; plot(th(ex_),R_transfer(ex_),'.r');
         end
-
+ 
+        function           demo_xrd_fit()
+            %
+            clear; clc; import mbe_toolbox.*
+            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
+            d  = xrdmlread('~/Downloads/ZW628_70minPbZr0p3Ti0p7O3_onSrTiO3_tth.xrdml');
+            % semilogy(d.Theta2,d.data)
+            domain = [18,25];
+            [d,th2] = analyze_xrd_with_fit(d.Theta2,d.data,hv,domain);
+        end
+        
         function [RR]    = simulate_xrr(layer,th,hv,thickness,filling,roughness,method)
             %
             % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
@@ -355,7 +365,7 @@ classdef mbe_toolbox
             subplot(2,1,2); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200]);
         end
         
-        function           analyze_xrd_with_fit(th2,intensity,hv,domain)
+        function [d,th2] = analyze_xrd_with_fit(th2,intensity,hv,domain)
             %
             % beta = analyze_xrd_with_fit(th,xrr,hv)
             % 
@@ -363,7 +373,6 @@ classdef mbe_toolbox
             % xintensity [a.u.]         xrr intensity
             % hv         [eV]           photon energy
             % domain     [deg]          (optional) [min max]
-            % flag       -plot          plots iteration
             %
 
             import mbe_toolbox.*
@@ -381,36 +390,44 @@ classdef mbe_toolbox
             xcorr_ = @(A,B) numel(A)*A(:).'*B(:)-sum(A(:))*sum(B(:));
             pcorr_ = @(A,B) xcorr_(A,B)/(sqrt(xcorr_(A,A))*sqrt(xcorr_(B,B)));
             % define gaussian, sinc, peak, and objective functions
-            gaus_ = @(x) x(1).*exp( -((q-x(2))./x(3)).^2 );
-            sinc_ = @(x) abs(x(1)*sinc( (q-x(2)).*x(3) )).^2;
-            peak_ = @(x) sinc_(x(1:3))+gaus_(x(4:6)) + x(7);
-            objf_ = @(x) sum(abs(log(peak_(x)) - log(Fq./max(Fq)) )) ;
+            gaus_ = @(x) x(1).*exp(-((q-x(2))./x(3)).^2);
+            sinc_ = @(x) x(1).*sinc( (q-x(2)).*x(3)).^2 ;
+            func_ = @(x) sinc_(x(1:3))+gaus_(x(4:6)) + x(7);
+            objf_ = @(x) sum(abs(log(func_(x)) - log(Fq./max(Fq)) )) ;
             nvars = 7; % nargin(objf_);
-            % guess substrate maximum
+            % guess substrate position
             [~,j]=max(Fq); q_sub = q(j);
             % lower and upper bounds; starting condition
             LB = [0 min(q)  0 1 q_sub-0.1 0 0];
             UB = [1 max(q) 10 1 q_sub+0.1 1 1];
-            X0 = mean([LB;UB]); X0(3) = 0.001; X0(end) = 1E-6;
+            X0 = mean([LB;UB]); X0(3) = 0; X0(end) = 1E-4;
             % optimization options
-            %warning('off','globaloptim:mutationgaussian:shrinkFactor');
+            warning('off','globaloptim:mutationgaussian:shrinkFactor');
             opts_hybrid_ = optimoptions(...
-                @fmincon,'MaxFunctionEvaluations',1E3,...
+                @fmincon,'Display','off',...
+                         'MaxFunctionEvaluations',1E3,...
                          'MaxIterations',1E3,...
                          'StepTolerance',1E-18,...
                          'FunctionTolerance',1E-18,...
                          'Algorithm','active-set');
-            opts_ = optimoptions(@ga,'PopulationSize',1000, ...
+            opts_ = optimoptions(@ga,'PopulationSize',2000, ...
                                      'InitialPopulationMatrix',X0, ...
-                                     'MutationFcn',{@mutationgaussian, 1,-1}, ...
-                                     'FunctionTolerance', 0.01, ...
-                                     'Display','iter',...
-                                     'PlotFcns',{@plot_peak_},...
+                                     'MutationFcn',{@mutationgaussian, 2,0.2}, ...
+                                     'EliteCount',5, ...
+                                     'FunctionTolerance', 5, ...
+                                     'Display','off',...
+                                     'PlotFcns',{@plot_func_},...
                                      'HybridFcn',{@fmincon,opts_hybrid_});
             [x,~] = ga(objf_,nvars,[],[],[],[],LB,UB,[],opts_);
             
-            asd
-            function state = plot_peak_(~,state,flag,~)
+            % output
+            d = 2*pi*x(3); % thickness [nm]
+            th2 = get_th(x(2),hv); % 2theta peak position [deg]
+            
+            function state = plot_func_(~,state,flag,~)
+                
+                import mbe_toolbox.get_th
+                
                 switch flag
                     % Plot initialization
                     case 'init'
@@ -419,11 +436,12 @@ classdef mbe_toolbox
                         % find best population
                         [~,i]=min(state.Score);
                         % plot it
-                        semilogy(th2,peak_(state.Population(i,:)).*max(Fq),th2,Fq); 
+                        semilogy(th2,func_(state.Population(i,:)),th2,Fq./max(Fq)); 
                         %
-                        title(['Generation = ',num2str(state.Generation)]); axis tight;
-                        xlabel('2\theta'); ylabel('intensity [a.u.]');
-                        ylim([min(Fq),max(Fq)]);
+                        title(sprintf('thickness = %2.2f nm   2th = %2.3f deg   (generation = %i)',...
+                            2*pi*state.Population(i,3), 2*asind(1239.842/hv/(4*pi)*state.Population(i,2)),state.Generation )); 
+                        axis tight; xlabel('2\theta [deg]'); ylabel('intensity [a.u.]');
+                        ylim([min(Fq),max(Fq)]./max(Fq));
                 end
             end
         end
