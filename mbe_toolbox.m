@@ -1,14 +1,16 @@
 classdef mbe_toolbox
 
     properties (Constant)
-        tiny      = 1E-4; % precision of atomic coordinates
+        tiny      = 1E-4;          % precision of atomic coordinates
+        r_0       = 2.81794032E-6; % [nm]       classical electron radius
+        N_A       = 6.022141E23;   % [mol]      Avogadro's number
     end
     
     % pressure related things
 
     methods (Static)
         
-        function P = flux2pressure(J,T,m,th)
+        function [P]     = flux2pressure(J,T,m,th)
             %
             % P = flux2pressure(J,T,m,th) 
             % 
@@ -34,7 +36,7 @@ classdef mbe_toolbox
             
         end
         
-        function J = pressure2flux(P,T,m,th)
+        function [J]     = pressure2flux(P,T,m,th)
             %
             % J = pressure2flux(P,T,m,th) 
             % 
@@ -60,7 +62,7 @@ classdef mbe_toolbox
             
         end
         
-        function mfp = pressure2mfp(P,T,sigma)
+        function [mfp]   = pressure2mfp(P,T,sigma)
             %
             % mfp = pressure2mfp(P,T,sigma)
             % 
@@ -87,13 +89,340 @@ classdef mbe_toolbox
         
     end
     
+    % x-ray related things
+    
+    methods (Static)
+        
+        function [layer] = create_layer(thickness,filling,roughness,species,stoichiometry,density)
+
+            import mbe_toolbox.*
+
+            define_layer = @(thickness,filling,roughness,species,stoichiometry,density) ...
+                struct('thickness',thickness,'filling',filling,'roughness',roughness,...
+                'species',species,'Z',get_atomic_number(species),...
+                'stoichiometry',stoichiometry,'density',density);
+            layer = define_layer(thickness,filling,roughness,species,stoichiometry,density);
+            
+            % define layer basic properties
+            % get molecular weight [amu/f.u.] = [amu/atom * atom/f.u.]
+            layer.molecular_weight = sum(get_atomic_mass(layer.Z) .* layer.stoichiometry);
+            % atomic number density [atoms/nm^3]: (g/cm^3 * f.u./amu * atoms/f.u.) / (atoms/nm^3) = 602.24
+            layer.number_density = layer.density / layer.molecular_weight * 602.24;
+        end
+        
+        function [R]     = simulate_xray_reflectivity(layer,th,hv)
+            %
+            % R = simulate_xray_reflectivity(layer,th)
+            % 
+            % layers [struct]           layers
+            %    layer(i).d                 [nm]            thickness
+            %    layer(i).filling           [unitless]      filling
+            %    layer(i).roughness         [nm]            top layer roughness
+            %    layer(i).density           [g/cm^3]        mass density
+            %    layer(i).Z                 [Z]             atomic species
+            %    layer(i).stoichiometry     [atoms/u.c.]    number of atoms per formula unit
+            % qz     [1/nm]             wavevectors
+            % 
+            % example:
+            % %%
+            % clear;clc; import mbe_toolbox.*
+            % hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
+            % % thickness,filling,roughness,species,stoichiometry,density
+            % layer(1) = create_layer(  0,1,1,{'W'},[1],5);
+            % layer(2) = create_layer(1E3,1,0,{'Si'},[1],2.3290);
+            % layer(3) = create_layer( 50,1,1,{'C'},[1],5);
+            % 
+            % th = [0:0.01:4];
+            % R = simulate_xray_reflectivity(layer,th,hv)
+            % semilogy(th,R)
+            
+            import mbe_toolbox.*
+            
+            
+
+            % get dielectric contributions
+            nlayers = numel(layer);
+            for i = 1:nlayers
+                layer(i).delta = get_xray_dielectric_function_delta( ...
+                    layer(i).Z,layer(i).number_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv,th);
+                layer(i).beta  = get_xray_dielectric_function_beta(....
+                    layer(i).Z,layer(i).number_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv);
+            end
+            
+            [RR] = evaliate_parratt(layer,th,hv)
+            
+            semilogy(th,R) 
+            %%
+        end
+        
+        function [RR] = evaliate_parratt(layer,th,hv,method)
+            % NOTE: SOMETHING IS WRONG HERE: FRINGES DON'T MATCH FFT
+            % NOTE: SOMETHING IS WRONG HERE: FRINGES DON'T MATCH FFT
+            % NOTE: SOMETHING IS WRONG HERE: FRINGES DON'T MATCH FFT
+            % NOTE: SOMETHING IS WRONG HERE: FRINGES DON'T MATCH FFT
+            % NOTE: SOMETHING IS WRONG HERE: FRINGES DON'T MATCH FFT
+
+            
+% clear;clc; import mbe_toolbox.*
+% hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
+% % thickness,filling,roughness,species,stoichiometry,density
+% layer(1) = create_layer(  50*(2*pi),1,0,{'Si'},[1], 20);
+% layer(2) = create_layer( 1E3,1,0,{'Si'},[1],1.5);
+% % layer(3) = create_layer(1E5,1,0.5,{'Si'},[1],2.3290);
+% 
+% 
+% qz = [0.001:0.001:10];
+% th = asind(get_photon_wavelength(hv)*qz/(4*pi));
+% 
+% % (4*pi)/get_photon_wavelength(hv)*[0:0.1:1]
+% 
+% % get dielectric contributions
+% nlayers = numel(layer);
+% for i = 1:nlayers
+%     layer(i).delta = get_xray_dielectric_function_delta( ...
+%         layer(i).Z,layer(i).number_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv,th);
+%     layer(i).beta  = get_xray_dielectric_function_beta(....
+%         layer(i).Z,layer(i).number_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv);
+% end
+% 
+% % layer(1).thickness =
+% 
+% R_parratt = evaliate_parratt(layer,th,hv,1);
+% R_transfer= evaliate_parratt(layer,th,hv,2);
+% 
+% % semilogy(th(:),R_parratt(:),'r',th(:),R_transfer(:),'.b')
+% 
+% % fft analysis
+% F = R_transfer;
+% [~,c]=max(-diff(F));
+% x = [0:1:100];
+% % q = sqrt(qz.^2 - qz(c).^2); F=F(q>0);q=q(q>0); 
+% q = qz;
+% nqs = numel(q); 
+% K = exp(-2i*pi*x(:).*q(:).');
+% Fx = (F.*q.^4-mean(F.*q.^4)).'.*tukeywin(nqs,0.90);
+% Fq = K*Fx;
+% subplot(3,1,1);
+% semilogy(q, F); 
+% subplot(3,1,2);
+% plot(q, Fx);
+% subplot(3,1,3);
+% plot(x, abs(Fq));
+            
+            import mbe_toolbox.*
+            
+            if nargin < 4
+                method = 2;
+            end
+
+            switch method
+                case 1 % explicit transfer matrix (slower)
+                    % number of layers
+                    nlayers = numel(layer);
+                    lambda = get_photon_wavelength(hv);
+                    th2kz = @(th,lambda) 4*pi/lambda .* sind(th(:));
+                    th2kx = @(th,lambda) 4*pi/lambda .* cosd(th(:));
+
+                    % [nths,nlayers] get refractive index 
+                    nths = numel(th); refractive_index = zeros(nths,nlayers);
+                    get_n = @(delta,beta,atoms_per_nm3) 1 + atoms_per_nm3*(-delta-beta*1i);
+                    for i = 1:nlayers
+                        % get dielectric function
+                        refractive_index(:,i) = get_n(layer(i).delta,layer(i).beta,layer(i).filling);
+                    end
+
+                    % [nths,nlayers] solve wavevector boundary conditions to get
+                    % out-of-plane wavevector component in layer kz [nths,nlayers].
+                    % 1. k2  = (n2/n1) k1 ; equivalently, n1 sin(theta_1) = n2 sin(theta_2)
+                    % 2. k1x = k2x  
+                    kz = zeros(nths,nlayers);
+                    get_kz_in_layer = @(n1,n2,k1z,k1x) sqrt( (n2./n1).^2 .* k1z.^2 + ((n2./n1).^2-1).*k1x.^2 );
+                    for i = 1:nlayers
+                        kz(:,i) = get_kz_in_layer(1,refractive_index(:,i),th2kz(th,lambda),th2kx(th,lambda));
+                    end
+
+                    % get transfer matricies R and T which describe propagation
+                    % across interfaces and media
+                    % syms a b c d k1 k2 z
+                    % % boundary conditions for plane waves at an interface
+                    % eq(1) = a * exp(1i*k1*z) + b * exp(-1i*k1*z) == c*exp(1i*k2*z) + d*exp(-1i*k2*z);
+                    % eq(2) = diff(eq(1),z);
+                    % solution = solve(eq,a,b);
+                    % % transfer matrix
+                    % T(1,1:2) = simplify(equationsToMatrix(solution.a,c,d));
+                    % T(2,1:2) = simplify(equationsToMatrix(solution.b,c,d));
+                    % % set interface at 0 for simplicity
+                    % T = subs(T,z,0)
+                    % simplify
+                    % T = simplify(expand(T));
+                    get_transfer_matrix_at_interface = @(k1,k2,sigma) [ ...
+                        [ (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1), (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1)]
+                        [ (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1), (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1)] ];
+
+                    get_transfer_matrix_in_medium = @(k,l) [ ...
+                            [ exp(-1i*k*l), 0]
+                            [ 0, exp(+1i*k*l)]];
+
+                    % get reflection at each theta value
+                    RR = zeros(nths,1);
+                    for j = 1:nths
+                        % vacuum/first layer
+                        % NOTE: SOMETHING IS WRONG HERE: FACTOR of 1/2 FOR ROUGHNESS AND THIKCNESS REQUIRED TO MATCH CASE 2
+                        % NOTE: SOMETHING IS WRONG HERE: FACTOR of 1/2 FOR ROUGHNESS AND THIKCNESS REQUIRED TO MATCH CASE 2
+                        % NOTE: SOMETHING IS WRONG HERE: FACTOR of 1/2 FOR ROUGHNESS AND THIKCNESS REQUIRED TO MATCH CASE 2
+                        % NOTE: SOMETHING IS WRONG HERE: FACTOR of 1/2 FOR ROUGHNESS AND THIKCNESS REQUIRED TO MATCH CASE 2
+                        % NOTE: SOMETHING IS WRONG HERE: FACTOR of 1/2 FOR ROUGHNESS AND THIKCNESS REQUIRED TO MATCH CASE 2
+                        M =     get_transfer_matrix_at_interface(th2kz(th(j),lambda), kz(j,1), .5*layer(1).roughness );
+                        M = M * get_transfer_matrix_in_medium(                        kz(j,1), .5*layer(1).thickness );
+                        % first layer ... nth layer
+                        if nlayers > 1
+                            for i = 2:nlayers
+                                M = M * get_transfer_matrix_at_interface( kz(j,i-1) , kz(j,i), .5*layer(i).roughness );
+                                M = M * get_transfer_matrix_in_medium(                kz(j,i), .5*layer(i).thickness );
+                            end
+                        end
+                        RR(j) = abs(M(2,1)./M(1,1)).^2;
+                    end
+                    
+                case 2 % recursive Parratt method without transfer matrix (faster)
+                    % number of layers
+                    nlayers = numel(layer);
+                    lambda = get_photon_wavelength(hv);
+                    th2kz = @(th,lambda) 4*pi/lambda .* sind(th(:));
+                    %----- Wavevector transfer in each layer
+                    nths = numel(th); Q = zeros(nlayers,nths);
+                    Q(1,:) = th2kz(th,lambda);
+                    for j=1:nlayers
+                        Q(j+1,:)=sqrt(Q(1,:).^2 - 8.*(2*pi/lambda).^2*( layer(j).delta + 1i*layer(j).beta )*layer(j).filling );
+                    end
+                    %----- Reflection coefficients (no multiple scattering)
+                    r = zeros(nlayers,nths);
+                    for j=1:nlayers
+                        r(j,:)=(  (Q(j,:)-Q(j+1,:))./(Q(j,:)+Q(j+1,:)) ) .* exp(-0.5*(Q(j,:).*Q(j+1,:))*layer(j).roughness^2);
+                    end
+                    %----- Reflectivity
+                    R = zeros(nlayers-1,nths);
+                    if nlayers>1
+                        R(1,:) =  (r(nlayers-1,:)  + r(nlayers,:) .* exp(1i*Q(nlayers,:)*layer(nlayers-1).thickness) ) ...
+                              ./(1+r(nlayers-1,:) .* r(nlayers,:) .* exp(1i*Q(nlayers,:)*layer(nlayers-1).thickness) );
+                    end
+                    if nlayers>2
+                        for j=2:nlayers-1
+                            R(j,:)=  (r(nlayers-j,:) +R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*layer(nlayers-j).thickness) ) ...
+                                 ./(1+r(nlayers-j,:).*R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*layer(nlayers-j).thickness) );
+                        end
+                    end
+                    %------ Intensity reflectivity
+                    if nlayers==1
+                        RR=abs(r(1,:)).^2;
+                    else
+                        RR=abs(R(nlayers-1,:)).^2;
+                    end
+            end
+        end
+
+        function [thc]   = get_xray_critical_angle(delta)
+            %
+            % thc = photoabsorbtion_crosssection(Z,lambda)
+            % 
+            % thc    [deg]          critical angle
+            % delta  [unitless]     real contribution to dielectric function
+            %
+            % Eq 3.3 in J. Als-Nielsen and Des McMorrow, Elements of Modern
+            % X-Ray Physics (John Wiley & Sons, 2011). 
+            %
+            
+            thc = sqrt( 2 * delta ) * 180/pi;
+            
+        end
+        
+        function [delta] = get_xray_dielectric_function_delta(Z,n,hv,th)
+            %
+            % delta = get_xray_dielectric_function_delta(Z,lambda)
+            % 
+            % delta  [unitless]     delta contribution to real part of dielectric function (n = 1 - delta + i beta)
+            % Z      [Z]            list of atomic numbers
+            % n      [atoms/nm^3]   list of atomic number density
+            % hv     [eV]           photon energy
+            %
+            % Conversion factor = 
+            %       (1/nm^3 ) * nm * nm^2 = 1
+            %
+            % Eq 3.2 in J. Als-Nielsen and Des McMorrow, Elements of Modern
+            % X-Ray Physics (John Wiley & Sons, 2011). 
+            %
+            
+            import mbe_toolbox.*
+            
+            f0 = get_atomic_form_factor(Z,th,hv); % [nZs,nhvs,nths]
+            [f1,~] = get_atomic_anomalous_scattering_factor(Z,hv); % [nZs,nhvs,nths]
+            delta = mbe_toolbox.r_0/(2*pi) .* get_photon_wavelength(hv).^2 .* sum((f0+f1).*n(:),1);
+            delta = permute(delta,[2,3,1]); % [nhvs,nths]
+        end
+
+        function [beta]  = get_xray_dielectric_function_beta(Z,n,hv)
+            %
+            % beta = get_xray_dielectric_function_beta(Z,lambda) [nhvs,nths]
+            % 
+            % beta   [unitless]     beta contribution to imaginary part of dielectric function (n = 1 - delta + i beta)
+            % Z      [Z]            list of atomic numbers
+            % n      [atoms/nm^3]   list of atomic number density
+            % hv     [eV]           photon energy
+            %
+            % Conversion factor = 
+            %       (1/nm^3 ) * nm * nm^2 = 1
+            %
+            % Equation:
+            %
+            %                                  n
+            % beta = r_0 * lambda^2 / 2*pi  * sum ( n_i * f2_i )
+            %                                 i=1
+            %
+            % for number density n_i for atom i with f2 imaginary anomolous
+            % atomic scattering factor. 
+            %
+            % Eq. 3 in B. L. Henke, E. M. Gullikson, and J. C. Davis,
+            % Atomic Data and Nuclear Data Tables 54, 181 (1993). 
+            %
+            
+            import mbe_toolbox.*
+            
+            [~,f2] = get_atomic_anomalous_scattering_factor(Z,hv); % [nZs,nhvs,nths]
+            beta = mbe_toolbox.r_0/(2*pi) .* get_photon_wavelength(hv).^2 .* sum(f2.*n(:),1);
+            beta = permute(beta,[2,3,1]); % [nhvs,nths]
+            
+            % this is equivalent:
+            % sigma = get_atomic_photoabsorbtion_crosssection(Z,hv);
+            % beta = get_photon_wavelength(hv)/(4*pi) * sum(sigma.*n(:),1) * 1E-21;
+            % beta = permute(beta,[2,3,1]); % [nhvs,nths]
+
+        end
+
+        function [mu]    = get_xray_linear_absorbtion_coeffcient(Z,n,hv)
+            %
+            % mu = get_xray_linear_absorbtion_coeffcient(Z,n,hv)
+            % 
+            % mu     [1/nm]         atomic linear absorbtion coefficient
+            % Z      [Z]            list of atomic numbers
+            % n      [atoms/nm^3]   list of atomic number density
+            % hv     [eV]           photon energy
+            %
+
+            import mbe_toolbox.*
+            
+            mu = (4*pi) * get_xray_dielectric_function_beta(Z,n,hv) / get_photon_wavelength(hv);
+            
+        end
+        
+    end
+    
     % periodic table related things
     
     methods (Static)
         
-        function [Z]    = symb2Z(symb)
+        function [Z]     = get_atomic_number(symb)
             %
-            % Z = symb2Z(symb)
+            % Z = get_atomic_number(symb)
             % 
             % symb  atomic symbol
             % Z     atomic number
@@ -107,12 +436,41 @@ classdef mbe_toolbox
                  'tl' ,'pb' ,'bi' ,'po' ,'at' ,'rn' ,'fr' ,'ra' ,'ac' ,'th' ,'pa' ,'u'  ,'np' ,'pu' ,'am' ,'cm' , ...
                  'bk' ,'cf' ,'es' ,'fm' ,'md' ,'no' ,'lr' ,'rf' ,'db' ,'sg' ,'bh' ,'hs' ,'mt' ,'ds' ,'rg' ,'uub', ...
                  'uut','uuq','uup','uuh'}; 
-             Z = find(strcmp(strtrim(lower(symb)),symbol_database));
+            if iscell(symb)
+                nZs = numel(symb); Z = zeros(1,nZs);
+                for i = 1:nZs
+                    Z(i) = find(strcmp(strtrim(lower(symb{i})),symbol_database));
+                end
+            else
+                Z = find(strcmp(strtrim(lower(symb)),symbol_database));
+            end
         end
         
-        function [m]    = Z2mass(Z)
+        function [symb]  = get_atomic_symbol(Z)
             %
-            % m = Z2mass(Z)
+            % Z = get_atomic_number(symb)
+            % 
+            % symb  atomic symbol
+            % Z     atomic number
+            % 
+            symbol_database = {...
+                 'h'  ,'he' ,'li' ,'be' ,'b'  ,'c'  ,'n'  ,'o'  ,'f'  ,'ne' ,'na' ,'mg' ,'al' ,'si' ,'p'  ,'s'  , ...
+                 'cl' ,'ar' ,'k'  ,'ca' ,'sc' ,'ti' ,'v'  ,'cr' ,'mn' ,'fe' ,'co' ,'ni' ,'cu' ,'zn' ,'ga' ,'ge' , ...
+                 'as' ,'se' ,'br' ,'kr' ,'rb' ,'sr' ,'y'  ,'zr' ,'nb' ,'mo' ,'tc' ,'ru' ,'rh' ,'pd' ,'ag' ,'cd' , ...
+                 'in' ,'sn' ,'sb' ,'te' ,'i'  ,'xe' ,'cs' ,'ba' ,'la' ,'ce' ,'pr' ,'nd' ,'pm' ,'sm' ,'eu' ,'gd' , ...
+                 'tb' ,'dy' ,'ho' ,'er' ,'tm' ,'yb' ,'lu' ,'hf' ,'ta' ,'w'  ,'re' ,'os' ,'ir' ,'pt' ,'au' ,'hg' , ...
+                 'tl' ,'pb' ,'bi' ,'po' ,'at' ,'rn' ,'fr' ,'ra' ,'ac' ,'th' ,'pa' ,'u'  ,'np' ,'pu' ,'am' ,'cm' , ...
+                 'bk' ,'cf' ,'es' ,'fm' ,'md' ,'no' ,'lr' ,'rf' ,'db' ,'sg' ,'bh' ,'hs' ,'mt' ,'ds' ,'rg' ,'uub', ...
+                 'uut','uuq','uup','uuh'}; 
+            nZs = numel(Z); symb = cell(1,nZs);
+            for i = 1:nZs
+                symb(i) = symbol_database(Z(i));
+            end
+        end
+
+        function [m]     = get_atomic_mass(Z)
+            %
+            % m = get_atomic_mass(Z)
             % 
             % Z     atomic number
             % m     atomic mass
@@ -139,12 +497,74 @@ classdef mbe_toolbox
                   231.035900000,   238.028910000,   237.048000000,   244.000000000,   243.000000000, ...
                   247.000000000,   247.000000000,   251.000000000,   252.000000000,   257.000000000, ...
                   258.000000000,   259.000000000,   262.000000000,   261.000000000,   262.000000000, ...
-                  263.000000000,   262.000000000,   265.000000000,   266.000000000]; m = mass_database(Z);
+                  263.000000000,   262.000000000,   265.000000000,   266.000000000]; 
+            nZs = numel(Z); m = zeros(1,nZs);
+            for i = 1:nZs
+                m(i) = mass_database(Z(i));
+            end
         end
         
-        function [f0]   = formfactor(Z,th,lambda)
+        function [sigma] = get_atomic_photoabsorbtion_crosssection(Z,hv)
             %
-            % f0 = formfactor(Z,th,lambda)
+            % sigma = photoabsorbtion_crosssection(Z,hv) [nZs,nhvs]
+            % 
+            % sigma  [cm^2/atom]    atomic photoabsorbtion cross-section
+            % Z      [Z]            atomic number
+            % hv     [eV]           photon energy
+            %
+            % Conversion:
+            %   nm * nm / (cm^2) = 1E-14
+            %
+            % B. L. Henke, E. M. Gullikson, and J. C. Davis, Atomic Data
+            % and Nuclear Data Tables 54, 181 (1993). 
+            
+            % 8.447890E+00  5.3312E+01
+            %
+            
+            import mbe_toolbox.*
+            
+            [~,f2] = get_atomic_anomalous_scattering_factor(Z,hv);
+
+            sigma =  2 * mbe_toolbox.r_0 .* get_photon_wavelength(hv) .* f2 .* 1E14;
+
+        end
+
+        function [f1,f2] = get_atomic_anomalous_scattering_factor(Z,hv)
+            %
+            % [f1,f2] = get_atomic_anomalous_scattering_factor(Z,lambda) [nZs,nhvs]
+            % 
+            % Z      [Z]            atomic number
+            % hv     [eV]           photon energy
+            % f1     [e-/atom]      atomic scattering factor
+            % f2     [e-/atom]      atomic scattering factor
+            %
+            % Conversion factor = 
+            %       Plank's constant * speed of light / nm / eV
+            %
+            % B. L. Henke, E. M. Gullikson, and J. C. Davis, Atomic Data
+            % and Nuclear Data Tables 54, 181 (1993). 
+            %
+            
+            import mbe_toolbox.*
+
+            nZs = numel(Z); nhvs = numel(hv); f1 = zeros(nZs,nhvs); f2 = zeros(nZs,nhvs);
+            for i = 1:nZs
+            
+                symb = get_atomic_symbol(Z);
+                fid = fopen(['data_atomic_scattering_factor/',strtrim(lower(symb{i})),'.nff']);
+                    buffer = fgetl(fid); buffer = reshape(fscanf(fid,'%f'),3,[]).';
+                fclose(fid);
+
+                for j = 1:nhvs
+                    f1(i,j) = interp1(buffer(:,1),buffer(:,2),hv(j));
+                    f2(i,j) = interp1(buffer(:,1),buffer(:,3),hv(j));
+                end
+            end
+        end
+        
+        function [f0]    = get_atomic_form_factor(Z,th,hv)
+            %
+            % f0 = get_atomic_form_factor(Z,th,lambda) [nZs,nhvs,nths]
             % 
             % Z      [Z]            atomic number
             % th     [K]            diffaction angle
@@ -160,16 +580,22 @@ classdef mbe_toolbox
             % bi, and c. 
             %
             
-            CM = Z2cromerman(Z);
-            ai = reshape(CM(1:2:7),1,1,[]);
-            bi = reshape(CM(2:2:8),1,1,[]);
-            f0 = sum( ai .* exp( - bi .* (sind(th)./lambda).^2 ) , 3) + CM(9);
+            import mbe_toolbox.*
             
+            nZs = numel(Z); nths = numel(th); nhvs = numel(hv); f0 = zeros(nZs,nhvs,nths);
+            for i = 1:nZs
+                CM = get_atomic_cromer_mann_coefficients(Z(i));
+                ai = reshape(CM(1:2:7),1,1,[]);
+                bi = reshape(CM(2:2:8),1,1,[]);
+                for j = 1:nhvs
+                    f0(i,j,:) = sum( ai .* exp( - bi .* (sind(th)./get_photon_wavelength(hv(j))).^2 ) , 3) + CM(9);
+                end
+            end
         end
         
-        function [CM]   = Z2cromerman(Z)
+        function [CM]    = get_atomic_cromer_mann_coefficients(Z)
             %
-            % CM = Z2cromerman(Z)
+            % CM = get_atomic_cromer_mann_coefficients(Z)
             % 
             % Z     atomic number
             % CM    array of Cromer-Mann coefficients [a1, b1, a2, b2, a3, b3, a4, b4, c]
@@ -280,10 +706,159 @@ classdef mbe_toolbox
           CM = CM_database(Z,:);
 
         end
+
+        function [hv]    = get_atomic_emission_line_energy(Z,emission_line)
+            %
+            % hv = get_xray_energy(Z,emission_line)
+            % 
+            % hv            [eV]           energy
+            % Z             [e/cm3]        e- density 
+            % emission_line [string]       Ka1, Ka2, Kb1, La1, La2, Lb1, Lb2, Lg1
+            %
+            % J. A. Bearden, Reviews of Modern Physics 39, 78 (1967).
+            %
+            
+            xray_database = [ ...
+                0      , 0       , 0      , 0      , 0      , 0      , 0      , 0      ; % 1   H   
+                0      , 0       , 0      , 0      , 0      , 0      , 0      , 0      ; % 2   He  
+                0.0543 , 0       , 0      , 0      , 0      , 0      , 0      , 0      ; % 3   Li  
+                0.1085 , 0       , 0      , 0      , 0      , 0      , 0      , 0      ; % 4   Be  
+                0.1833 , 0       , 0      , 0      , 0      , 0      , 0      , 0      ; % S   B   
+                0.277  , 0       , 0      , 0      , 0      , 0      , 0      , 0      ; % 6   C   
+                0.3924 , 0       , 0      , 0      , 0      , 0      , 0      , 0      ; % 7   N   
+                0.5249 , 0       , 0      , 0      , 0      , 0      , 0      , 0      ; % 8   O   
+                0.6768 , 0       , 0      , 0      , 0      , 0      , 0      , 0      ; % 9   F   
+                0.8486 , 0.8486  , 0      , 0      , 0      , 0      , 0      , 0      ; % 10  Ne  
+                1.04098, 1.04098 , 1.0711 , 0      , 0      , 0      , 0      , 0      ; % 11  Na  
+                1.25360, 1.25360 , 1.3022 , 0      , 0      , 0      , 0      , 0      ; % 12  Mg  
+                1.48670, 1.48627 , 1.55745, 0      , 0      , 0      , 0      , 0      ; % 13  Al  
+                1.73998, 1.73938 , 1.83594, 0      , 0      , 0      , 0      , 0      ; % 14  Si  
+                2.0137 , 2.0127  , 2.1391 , 0      , 0      , 0      , 0      , 0      ; % 15  P   
+                2.30784, 2.30664 , 2.46404, 0      , 0      , 0      , 0      , 0      ; % 16  S   
+                2.62239, 2.62078 , 2.8156 , 0      , 0      , 0      , 0      , 0      ; % 17  Cl  
+                2.95770, 2.95563 , 3.1905 , 0      , 0      , 0      , 0      , 0      ; % 18  Ar  
+                3.3138 , 3.3111  , 3.5896 , 0      , 0      , 0      , 0      , 0      ; % 19  K   
+                3.69168, 3.68809 , 4.0127 , 0.3413 , 0.3413 , 0.3449 , 0      , 0      ; % 20  Ca  
+                4.0906 , 4.0861  , 4.4605 , 0.3954 , 0.3954 , 0.3996 , 0      , 0      ; % 21  Sc  
+                4.51084, 4.50486 , 4.93181, 0.4522 , 0.4522 , 0.4584 , 0      , 0      ; % 22  Ti  
+                4.95220, 4.94464 , 5.42729, 0.5113 , 0.5113 , 0.5192 , 0      , 0      ; % 23  V   
+                5.41472, 5.405509, 5.94671, 0.5728 , 0.5728 , 0.5828 , 0      , 0      ; % 24  Cr  
+                5.89875, 5.88765 , 6.49045, 0.6374 , 0.6374 , 0.6488 , 0      , 0      ; % 25  Mn  
+                6.40384, 6.39084 , 7.05798, 0.7050 , 0.7050 , 0.7185 , 0      , 0      ; % 26  Fe  
+                6.93032, 6.91530 , 7.64943, 0.7762 , 0.7762 , 0.7914 , 0      , 0      ; % 27  Co  
+                7.47815, 7.46089 , 8.26466, 0.8515 , 0.8515 , 0.8688 , 0      , 0      ; % 28  Ni  
+                8.04778, 8.02783 , 8.90529, 0.9297 , 0.9297 , 0.9498 , 0      , 0      ; % 29  Cu  
+                8.63886, 8.61578 , 9.5720 , 1.0117 , 1.0117 , 1.0347 , 0      , 0      ; % 30  Zn  
+                9.25174, 9.22482 , 10.2642, 1.09792, 1.09792, 1.1248 , 0      , 0      ; % 31  Ga  
+                9.88642, 9.85532 , 10.9821, 1.18800, 1.18800, 1.2185 , 0      , 0      ; % 32  Ge  
+                10.5437, 10.50799, 11.7262, 1.2820 , 1.2820 , 1.3170 , 0      , 0      ; % 33  As  
+                11.2224, 11.1814 , 12.4959, 1.37910, 1.37910, 1.41923, 0      , 0      ; % 34  Se  
+                11.9242, 11.8776 , 13.2914, 1.48043, 1.48043, 1.52590, 0      , 0      ; % 35  Br  
+                12.649 , 12.598  , 14.112 , 1.5860 , 1.5860 , 1.6366 , 0      , 0      ; % 36  Kr  
+                13.3953, 13.3358 , 14.9613, 1.69413, 1.69256, 1.75217, 0      , 0      ; % 37  Rb  
+                14.1650, 14.0979 , 15.8357, 1.80656, 1.80474, 1.87172, 0      , 0      ; % 38  Sr  
+                14.9584, 14.8829 , 16.7378, 1.92256, 1.92047, 1.99584, 0      , 0      ; % 39  Y   
+                15.7751, 15.6909 , 17.6678, 2.04236, 2.0399 , 2.1244 , 2.2194 , 2.3027 ; % 40  Zr  
+                16.6151, 16.5210 , 18.6225, 2.16589, 2.1630 , 2.2574 , 2.3670 , 2.4618 ; % 41  Nb  
+                17.4793, 17.3743 , 19.6083, 2.29316, 2.28985, 2.39481, 2.5183 , 2.6235 ; % 42  Mo  
+                18.3671, 18.2508 , 20.619 , 2.4240 , 0      , 2.5368 , 0      , 0      ; % 43  Tc  
+                19.2792, 19.1504 , 21.6568, 2.55855, 2.55431, 2.68323, 2.8360 , 2.9645 ; % 44  Ru  
+                20.2161, 20.0737 , 22.7236, 2.69674, 2.69205, 2.83441, 3.0013 , 3.1438 ; % 45  Rh  
+                21.1771, 21.0201 , 23.8187, 2.83861, 2.83325, 2.99022, 3.17179, 3.3287 ; % 46  Pd  
+                22.1629, 21.9903 , 24.9424, 2.98431, 2.97821, 3.15094, 3.34781, 3.51959; % 47  Ag  
+                23.1736, 22.9841 , 26.0955, 3.13373, 3.12691, 3.31657, 3.52812, 3.71686; % 48  Cd  
+                24.2097, 24.0020 , 27.2759, 3.28694, 3.27929, 3.48721, 3.71381, 3.92081; % 49  In  
+                25.2713, 25.0440 , 28.4860, 3.44398, 3.43542, 3.66280, 3.90486, 4.13112; % 50  Sn  
+                26.3591, 26.1108 , 29.7256, 3.60472, 3.59532, 3.84357, 4.10078, 4.34779; % 51  Sb  
+                27.4723, 27.2017 , 30.9957, 3.76933, 3.7588 , 4.02958, 4.3017 , 4.5709 ; % 52  Te  
+                28.6120, 28.3172 , 32.2947, 3.93765, 3.92604, 4.22072, 4.5075 , 4.8009 ; % 53  I   
+                29.779 , 29.458  , 33.624 , 4.1099 , 0      , 0      , 0      , 0      ; % 54  Xe  
+                30.9728, 30.6251 , 34.9869, 4.2865 , 4.2722 , 4.6198 , 4.9359 , 5.2804 ; % 55  Cs  
+                32.1936, 31.8171 , 36.3782, 4.46626, 4.45090, 4.82753, 5.1565 , 5.5311 ; % 56  Ba  
+                33.4418, 33.0341 , 37.8010, 4.65097, 4.63423, 5.0421 , 5.3835 , 5.7885 ; % 57  La  
+                34.7197, 34.2789 , 39.2573, 4.8402 , 4.8230 , 5.2622 , 5.6134 , 6.052  ; % 58  Ce  
+                36.0263, 35.5502 , 40.7482, 5.0337 , 5.0135 , 5.4889 , 5.850  , 6.3221 ; % 59  Pr  
+                37.3610, 36.8474 , 42.2713, 5.2304 , 5.2077 , 5.7216 , 6.0894 , 6.6021 ; % 60  Nd  
+                38.7247, 38.1712 , 43.826 , 5.4325 , 5.4078 , 5.961  , 6.339  , 6.892  ; % 61  Pm  
+                40.1181, 39.5224 , 45.413 , 5.6361 , 5.6090 , 6.2051 , 6.586  , 7.178  ; % 62  Sm  
+                41.5422, 40.9019 , 47.0379, 5.8457 , 5.8166 , 6.4564 , 6.8432 , 7.4803 ; % 63  Eu  
+                42.9962, 42.3089 , 48.697 , 6.0572 , 6.0250 , 6.7132 , 7.1028 , 7.7858 ; % 64  Gd  
+                44.4816, 43.7441 , 50.382 , 6.2728 , 6.2380 , 6.978  , 7.3667 , 8.102  ; % 65  Tb  
+                45.9984, 45.2078 , 52.119 , 6.4952 , 6.4577 , 7.2477 , 7.6357 , 8.4188 ; % 66  Dy  
+                47.5467, 46.6997 , 53.877 , 6.7198 , 6.6795 , 7.5253 , 7.911  , 8.747  ; % 67  Ho  
+                49.1277, 48.2211 , 55.681 , 6.9487 , 6.9050 , 7.8109 , 8.1890 , 9.089  ; % 68  Er  
+                50.7416, 49.7726 , 57.517 , 7.1799 , 7.1331 , 8.101  , 8.468  , 9.426  ; % 69  Tm  
+                52.3889, 51.3540 , 59.37  , 7.4156 , 7.3673 , 8.4018 , 8.7588 , 9.7801 ; % 70  Yb  
+                54.0698, 52.9650 , 61.283 , 7.6555 , 7.6049 , 8.7090 , 9.0489 , 10.1434; % 71  Lu  
+                55.7902, 54.6114 , 63.234 , 7.8990 , 7.8446 , 9.0227 , 9.3473 , 10.5158; % 72  Hf  
+                57.532 , 56.277  , 65.223 , 8.1461 , 8.0879 , 9.3431 , 9.6518 , 10.8952; % 73  Ta  
+                59.3182, 57.9817 , 67.2443, 8.3976 , 8.3352 , 9.67235, 9.9615 , 11.2859; % 74  W   
+                61.1403, 59.7179 , 69.310 , 8.6525 , 8.5862 , 10.0100, 10.2752, 11.6854; % 75  Re  
+                63.0005, 61.4867 , 71.413 , 8.9117 , 8.8410 , 10.3553, 10.5985, 12.0953; % 76  Os  
+                64.8956, 63.2867 , 73.5608, 9.1751 , 9.0995 , 10.7083, 10.9203, 12.5126; % 77  Ir  
+                66.832 , 65.112  , 75.748 , 9.4423 , 9.3618 , 11.0707, 11.2505, 12.9420; % 78  Pt  
+                68.8037, 66.9895 , 77.984 , 9.7133 , 9.6280 , 11.4423, 11.5847, 13.3817; % 79  Au  
+                70.819 , 68.895  , 80.253 , 9.9888 , 9.8976 , 11.8226, 11.9241, 13.8301; % 80  Hg  
+                72.8715, 70.8319 , 82.576 , 10.2685, 10.1728, 12.2133, 12.2715, 14.2915; % 81  Tl  
+                74.9694, 72.8042 , 84.936 , 10.5515, 10.4495, 12.6137, 12.6226, 14.7644; % 82  Pb  
+                77.1079, 74.8148 , 87.343 , 10.8388, 10.7309, 13.0235, 12.9799, 15.2477; % 83  Bi  
+                79.290 , 76.862  , 89.80  , 11.1308, 11.0158, 13.447 , 13.3404, 15.744 ; % 84  Po  
+                81.52  , 78.95   , 92.30  , 11.4268, 11.3048, 13.876 , 0      , 16.251 ; % 8S  At  
+                83.78  , 81.07   , 94.87  , 11.7270, 11.5979, 14.316 , 0      , 16.770 ; % 86  Rn  
+                86.10  , 83.23   , 97.47  , 12.0313, 11.8950, 14.770 , 14.45  , 17.303 ; % 87  Fr  
+                88.47  , 85.43   , 100.13 , 12.3397, 12.1962, 15.2358, 14.8414, 17.849 ; % 88  Ra  
+                90.884 , 87.67   , 102.85 , 12.6520, 12.5008, 15.713 , 0      , 18.408 ; % 89  Ac  
+                93.350 , 89.953  , 105.609, 12.9687, 12.8096, 16.2022, 15.6237, 18.9825; % 90  Th  
+                95.868 , 92.287  , 108.427, 13.2907, 13.1222, 16.702 , 16.024 , 19.568 ; % 91  Pa  
+                98.439 , 94.665  , 111.300, 13.6147, 13.4388, 17.2200, 16.4283, 20.16 ]; % 92  U
+            
+            line_database = {'kalpha1','kalpha2','kbeta1','lalpha1','lalpha2','lbeta1','lbeta2','lgamma1'};
+            j = find(strcmp(strtrim(lower(emission_line)),line_database));
+
+            hv = xray_database(Z,j)*1E3;
+
+        end
+        
+        function [hv]    = get_photon_energy(lambda)
+            %
+            % E = get_photon_energy(lambda)
+            % 
+            % E      [eV]           photon energy
+            % lambda [nm]           photon wavelength
+            %
+            % Conversion factor = 
+            %       Plank's constant * speed of light / nm / eV
+            %
+            
+            hv = 1239.842 ./ lambda;
+            
+        end
+        
+        function [lambda]= get_photon_wavelength(hv)
+            %
+            % E = get_photon_energy(lambda)
+            % 
+            % E      [eV]           photon energy
+            % lambda [nm]           photon wavelength
+            %
+            % Conversion factor = 
+            %       Plank's constant * speed of light / nm / eV
+            %
+            
+            lambda = 1239.842 ./ hv;
+            
+        end
+        
         
     end
     
 end
+
+
+
+
+
+
 
 
 
