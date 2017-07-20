@@ -297,11 +297,10 @@ classdef mbe_toolbox
             % subtract critical wavevector
             if isempty(qc); [~,c]=max(-diff(F)./diff(th)); qc = qz(c); end
             q = sqrt(qz.^2 - qc.^2); Fq=F(q>0); q=q(q>0); nqs = numel(q);
+            % resample Fq,q on equidistant intervals
+            qe = linspace(min(q),max(q),nqs).'; Fq = interp1(q,Fq,qe); q = qe; 
             % apply background correction
             Fq= (Fq.*q.^4-mean(Fq.*q.^4)).*tukeywin(nqs,0.90);
-            % resample Fq and q using equidistant intervals
-            Fq= interp1(q,Fq,linspace(min(q),max(q),nqs));
-            q = linspace(min(q),max(q),nqs);
             % evalute DFT
             x  = [0:0.5:200]; 
             K  = exp(-1i*x(:).*q(:).');
@@ -315,6 +314,118 @@ classdef mbe_toolbox
             subplot(3,1,2); plot(q, Fq); xlabel('(q^2 - q_c^2)^{1/2} [1/nm]'); ylabel('Intensity [a.u.]'); axis tight;
             subplot(3,1,3); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200])
 
+        end
+
+        function           analyze_xrd_with_fft(th2,intensity,hv,domain)
+            %
+            % beta = analyze_xrd_with_fft(th,xrr,hv,domain)
+            % 
+            % th         [deg]          incident x-ray angle
+            % xintensity [a.u.]         xrr intensity
+            % hv         [eV]           photon energy
+            % domain     [deg]          (optional) [min max]
+            %
+            % Example:
+            % ex_ = th<1.8;
+            % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv,0.36)
+            % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv)
+            %
+
+            import mbe_toolbox.*
+            
+            % resample intensity and q on equidistant intervals
+            q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
+            % if window is defined, crop and filter
+            if 4 > 3
+                ex_ = and( th2 < max(domain) , th2 > min(domain) ); nqs = sum(ex_);
+                th2 = th2(ex_); q = q(ex_); Fq = Fq(ex_);% .* tukeywin(nqs,0.90);
+            else 
+                ex_ = true;
+            end
+            % evalute DFT
+            x  = [0:0.5:200]; 
+            K  = exp(-1i*x(:).*q(:).');
+            Fx = K*Fq(:);
+            % evaluate FFT
+            nxs=2^10;
+            x_fft = [0:nxs-1]/(nxs)/(q(2)-q(1))*pi*2; x_fft = x_fft([1:floor(nxs/2)]);
+            F_fft = fft(Fq,2^10);                     F_fft = F_fft([1:floor(nxs/2)]);
+            % plot th, Fx, and Fq
+            subplot(2,1,1); semilogy(th2,Fq,'-'); xlabel('2\theta [deg]'); ylabel('Intensity [a.u.]'); axis tight;
+            subplot(2,1,2); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200]);
+        end
+        
+        function           analyze_xrd_with_fit(th2,intensity,hv,domain)
+            %
+            % beta = analyze_xrd_with_fit(th,xrr,hv)
+            % 
+            % th         [deg]          incident x-ray angle
+            % xintensity [a.u.]         xrr intensity
+            % hv         [eV]           photon energy
+            % domain     [deg]          (optional) [min max]
+            % flag       -plot          plots iteration
+            %
+
+            import mbe_toolbox.*
+            
+            % resample intensity and q on equidistant intervals
+            q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
+            % if window is defined, crop and filter
+            if 4 > 3
+                ex_ = and( th2 < max(domain) , th2 > min(domain) );
+                th2 = th2(ex_); q = q(ex_); Fq = Fq(ex_);
+            else 
+                ex_ = true;
+            end
+            % pearson's correlation coefficient
+            xcorr_ = @(A,B) numel(A)*A(:).'*B(:)-sum(A(:))*sum(B(:));
+            pcorr_ = @(A,B) xcorr_(A,B)/(sqrt(xcorr_(A,A))*sqrt(xcorr_(B,B)));
+            % define gaussian, sinc, peak, and objective functions
+            gaus_ = @(x) x(1).*exp( -((q-x(2))./x(3)).^2 );
+            sinc_ = @(x) abs(x(1)*sinc( (q-x(2)).*x(3) )).^2;
+            peak_ = @(x) sinc_(x(1:3))+gaus_(x(4:6)) + x(7);
+            objf_ = @(x) sum(abs(log(peak_(x)) - log(Fq./max(Fq)) )) ;
+            nvars = 7; % nargin(objf_);
+            % guess substrate maximum
+            [~,j]=max(Fq); q_sub = q(j);
+            % lower and upper bounds; starting condition
+            LB = [0 min(q)  0 1 q_sub-0.1 0 0];
+            UB = [1 max(q) 10 1 q_sub+0.1 1 1];
+            X0 = mean([LB;UB]); X0(3) = 0.001; X0(end) = 1E-6;
+            % optimization options
+            %warning('off','globaloptim:mutationgaussian:shrinkFactor');
+            opts_hybrid_ = optimoptions(...
+                @fmincon,'MaxFunctionEvaluations',1E3,...
+                         'MaxIterations',1E3,...
+                         'StepTolerance',1E-18,...
+                         'FunctionTolerance',1E-18,...
+                         'Algorithm','active-set');
+            opts_ = optimoptions(@ga,'PopulationSize',1000, ...
+                                     'InitialPopulationMatrix',X0, ...
+                                     'MutationFcn',{@mutationgaussian, 1,-1}, ...
+                                     'FunctionTolerance', 0.01, ...
+                                     'Display','iter',...
+                                     'PlotFcns',{@plot_peak_},...
+                                     'HybridFcn',{@fmincon,opts_hybrid_});
+            [x,~] = ga(objf_,nvars,[],[],[],[],LB,UB,[],opts_);
+            
+            asd
+            function state = plot_peak_(~,state,flag,~)
+                switch flag
+                    % Plot initialization
+                    case 'init'
+                        clf; figure(1); set(gcf,'color','w');
+                    case 'iter'
+                        % find best population
+                        [~,i]=min(state.Score);
+                        % plot it
+                        semilogy(th2,peak_(state.Population(i,:)).*max(Fq),th2,Fq); 
+                        %
+                        title(['Generation = ',num2str(state.Generation)]); axis tight;
+                        xlabel('2\theta'); ylabel('intensity [a.u.]');
+                        ylim([min(Fq),max(Fq)]);
+                end
+            end
         end
         
         function [thc]   = get_xray_critical_angle(delta)
@@ -415,6 +526,14 @@ classdef mbe_toolbox
             import mbe_toolbox.*
             
             qz = 4*pi/get_photon_wavelength(hv) * sind(th);
+            
+        end
+
+        function [th]    = get_th(qz,hv)
+            
+            import mbe_toolbox.*
+            
+            th = asind( get_photon_wavelength(hv)*qz/(4*pi) );
             
         end
         
@@ -875,6 +994,7 @@ classdef mbe_toolbox
             lambda = 1239.842 ./ hv;
             
         end
+        
         
         
     end
