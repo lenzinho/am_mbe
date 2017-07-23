@@ -156,6 +156,32 @@ classdef mbe_toolbox
             [d,th2] = analyze_xrd_with_fit(d.Theta2,d.data,hv,domain);
         end
         
+        function           demo_xrr_fit()
+            
+            clear; clc; import mbe_toolbox.*
+           
+            % define photon energy and angles
+            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
+            
+            % load data
+            fname = './test_data/0.8W_on_Si_refs.txt';
+%             fname = './test_data/0.8Ta2O5_on_Si_refs.txt';
+            fid = fopen(fname,'r'); x = fscanf(fid,'%f %f\n'); fclose(fid);
+            th = x(1:2:end); intensity = x(2:2:end);
+           
+            % define material (species, stoichiometry, density)
+            layer(1) = define_material({'W'},[1],19.3);
+%             layer(1) = define_material({'Ta','O'},[2,5],8.2);
+            layer(2) = define_material({'Si'},[1],2.53);
+            
+            isfixed = [  0   1   0   0 0 0 0      0];
+            lb      = [  0 1E8 0.6 0.6 0 0 1   1E-8];
+            ub      = [100 1E8 1.4 1.4 5 5 1E8 1E+2];
+            x0      = mean([lb;ub]);
+            
+            x = analyze_xrr_with_fit(th,intensity,hv,layer,x0,ub,lb,isfixed);
+        end
+        
         function [RR]    = simulate_xrr(layer,th,hv,thickness,filling,roughness,method)
             %
             % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
@@ -318,48 +344,81 @@ classdef mbe_toolbox
 
         end
 
-        function           analyze_xrr_with_fit(th,intensity,hv,domain,layer,x0,UB,LB)
+        function [x]     = analyze_xrr_with_fit(th,intensity,hv,layer,x0,ub,lb,isfixed,domain)
             %
             
-%             import mbe_toolbox.*
-%             
-%             % define photon energy and angles
-%             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
-%             th = [0:0.005:4].';
-% 
-%             % define material (species, stoichiometry [per f.u.], density)
-% %             layer(1) = define_material({'Ge'},[1],5.323);
-% %             layer(1) = define_material({'W'},[1],19.3);
-%             layer(1) = define_material({'Ta','O'},[2,5],8.2);
-%             layer(2) = define_material({'Si'},[1],2.53);
-% 
-%             thickness = [50 1E3];
-%             roughness = [0 0];
-%             filling   = [1 1];
-% 
-%             % get dielectric contributions
-%             nlayers = numel(layer);
-%             for i = 1:nlayers
-%                 layer(i).delta = get_xray_dielectric_function_delta( ...
-%                     layer(i).Z,layer(i).atomic_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv,th);
-%                 layer(i).beta  = get_xray_dielectric_function_beta(....
-%                     layer(i).Z,layer(i).atomic_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv);
-%             end
-% 
-%             % simulate and analyze
-%             % x = [thickness,filling,roughness,I0,background]
-%             nlayers = numel(layer);
-%             simulate_ = @(x,method) simulate_xrr(layer,th,hv,...
-%                 x(0*nlayers+[1:nlayers]),...
-%                 x(1*nlayers+[1:nlayers]),...
-%                 x(2*nlayers+[1:nlayers]),method)*x(end-1)+x(end);
-%             R_transfer = simulate_([thickness,filling,roughness,2,1E-3],1);
-%             R_parratt  = simulate_([thickness,filling,roughness,2,1E-3],2);
-% 
-%             % exclude above noise floor
-%             ex_ = th<1.8; ex_ = th>0;
-%             analyze_xrr_with_fft(th(ex_),R_parratt(ex_),hv)
-%             subplot(3,1,1); hold on; plot(th(ex_),R_transfer(ex_),'.r');
+            import mbe_toolbox.*
+            
+            % if window is defined, crop and filter
+            if nargin > 8
+                ex_ = and( th < max(domain) , th > min(domain) );
+                th = th(ex_); intensity = intensity(ex_);
+            end
+            
+            % get dielectric contributions
+            nlayers = numel(layer);
+            for i = 1:nlayers
+                layer(i).xray_refractive_index = get_xray_refractive_index( ...
+                    layer(i).Z,layer(i).atomic_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv,th);
+            end
+            % x = [thickness,filling,roughness,I0,background]
+            nlayers = numel(layer);
+            simulate_ = @(x) simulate_xrr(layer,th,hv,...
+                x(0*nlayers+[1:nlayers]),...
+                x(1*nlayers+[1:nlayers]),...
+                x(2*nlayers+[1:nlayers]))*x(end-1)+x(end);
+            % define rescaling
+            fscale_= @(x)   [x(1:(3*nlayers)),log(x((3*nlayers+1):end))];
+            rscale_= @(x)   [x(1:(3*nlayers)),exp(x((3*nlayers+1):end))];
+            % define objective function: robust + pearson's correlation coefficient
+            cost_  = @(x) sum(abs( log(simulate_(rscale_(x))).' - log(intensity(:)) )) ;
+
+            % optimization options
+            warning('off','globaloptim:mutationgaussian:shrinkFactor');
+            opts_hybrid_ = optimoptions(...
+                @fmincon,'Display','off',...
+                         'MaxFunctionEvaluations',1E3,...
+                         'MaxIterations',1E3,...
+                         'StepTolerance',1E-18,...
+                         'FunctionTolerance',1E-18,...
+                         'Algorithm','active-set');
+            opts_ = optimoptions(@ga,'PopulationSize',500, ...
+                                     'InitialPopulationMatrix',x0(~isfixed), ...
+                                     'MutationFcn',{@mutationadaptfeasible}, ...
+                                     'EliteCount',1, ...
+                                     'FunctionTolerance',1, ...
+                                     'Display','off',...
+                                     'PlotFcns',{@plot_func_},...
+                                     'HybridFcn',{@fmincon,opts_hybrid_});
+            % perform optimization   
+            lb = fscale_(lb); ub = fscale_(ub);
+            [x,~] = ga_(cost_,x0,isfixed,[],[],[],[],lb(~isfixed),ub(~isfixed),[],opts_); x = rscale_(x);
+            
+            figure(1); clf; set(gcf,'color','w');
+            semilogy(th,intensity,'.',th,simulate_(x),'--');
+            axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
+            
+            function state = plot_func_(~,state,flag,~)
+                switch flag
+                    % Plot initialization
+                    case 'init'
+                        clf; figure(1); set(gcf,'color','w');
+                    case 'iter'
+                        % find best population
+                        [~,j]=min(state.Score);
+                        % reconstruct full vector
+                        f = find( isfixed); xf = x0(f);
+                        l = find(~isfixed); xl = state.Population(j,:);
+                        x([f,l]) = [xf,xl];
+                        % plot it
+                        semilogy(th,simulate_(rscale_(x)),th,intensity); 
+                        % title
+                        title(sprintf('(generation = %i)',state.Generation)); 
+                        % state.Population(i,3), 2*asind(1239.842/hv/(4*pi)*state.Population(i,2))
+                        axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
+                        ylim([min(intensity),max(intensity)]);
+                end
+            end
         end
         
         function           analyze_xrd_with_fft(th2,intensity,hv,domain)
@@ -416,15 +475,12 @@ classdef mbe_toolbox
             % resample intensity and q on equidistant intervals
             q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
             % if window is defined, crop and filter
-            if 4 > 3
+            if nargin > 3
                 ex_ = and( th2 < max(domain) , th2 > min(domain) );
                 th2 = th2(ex_); q = q(ex_); Fq = Fq(ex_);
             else 
                 ex_ = true;
             end
-            % pearson's correlation coefficient
-            xcorr_ = @(A,B) numel(A)*A(:).'*B(:)-sum(A(:))*sum(B(:));
-            pcorr_ = @(A,B) xcorr_(A,B)/(sqrt(xcorr_(A,A))*sqrt(xcorr_(B,B)));
             % define gaussian, sinc, peak, and objective functions
             gaus_ = @(x) x(1).*exp(-((q-x(2))./x(3)).^2);
             sinc_ = @(x) x(1).*sinc( (q-x(2)).*x(3)).^2 ;
@@ -461,8 +517,6 @@ classdef mbe_toolbox
             th2 = get_th(x(2),hv); % 2theta peak position [deg]
             
             function state = plot_func_(~,state,flag,~)
-                
-                import mbe_toolbox.get_th
                 
                 switch flag
                     % Plot initialization
@@ -673,31 +727,6 @@ classdef mbe_toolbox
             end
         end
         
-        function [sigma] = get_atomic_photoabsorbtion_crosssection(Z,hv)
-            %
-            % sigma = photoabsorbtion_crosssection(Z,hv) [nZs,nhvs]
-            % 
-            % sigma  [cm^2/atom]    atomic photoabsorbtion cross-section
-            % Z      [Z]            atomic number
-            % hv     [eV]           photon energy
-            %
-            % Conversion:
-            %   nm * nm / (cm^2) = 1E-14
-            %
-            % B. L. Henke, E. M. Gullikson, and J. C. Davis, Atomic Data
-            % and Nuclear Data Tables 54, 181 (1993). 
-            
-            % 8.447890E+00  5.3312E+01
-            %
-            
-            import mbe_toolbox.*
-            
-            [~,~,f2] = get_atomic_xray_form_factor(Z,hv);
-
-            sigma =  2 * mbe_toolbox.r_0 .* get_photon_wavelength(hv) .* f2 .* 1E14;
-
-        end
-
         function [f0,f1,f2] = get_atomic_xray_form_factor(Z,hv,th)
             %
             % [f1,f2] = get_atomic_xray_form_factor(Z,hv,th) [nZs,nhvs,nths]
@@ -1022,6 +1051,30 @@ classdef mbe_toolbox
         
         
         
+    end
+    
+    
+    % library
+
+    methods (Static)
+
+        function [x,r] = ga_(cost_,x0,isfixed,varargin)
+
+            % fixed and loose indicies
+            f = find( isfixed); xf = x0(f);
+            l = find(~isfixed); xl = x0(l);
+
+            % Estimate only the non-fixed ones
+            [xl,r] = ga(@localcost_,sum(isfixed==0),varargin{:});
+
+            % Re-create array combining fixed and estimated coefficients
+            x([f,l]) = [xf,xl];
+
+            function y = localcost_(x)
+               b([f,l]) = [xf,x]; y = cost_(b);
+            end
+        end
+
     end
     
 end
