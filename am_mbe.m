@@ -1,4 +1,4 @@
-classdef mbe_toolbox
+classdef am_mbe
 
     properties (Constant)
         tiny      = 1E-4;          % precision of atomic coordinates
@@ -107,7 +107,7 @@ classdef mbe_toolbox
             % roughness [nm]            inteface roughness
             % 
             
-            import mbe_toolbox.*
+            import am_mbe.*
             
             % define photon energy and angles
             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
@@ -148,7 +148,7 @@ classdef mbe_toolbox
  
         function           demo_xrd_fit()
             %
-            clear; clc; import mbe_toolbox.*
+            clear; clc; import am_mbe.*
             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
             d  = xrdmlread('~/Downloads/ZW628_70minPbZr0p3Ti0p7O3_onSrTiO3_tth.xrdml');
             % semilogy(d.Theta2,d.data)
@@ -158,7 +158,7 @@ classdef mbe_toolbox
         
         function           demo_xrr_fit()
             
-            clear; clc; import mbe_toolbox.*
+            clear; clc; import am_mbe.*
            
             % define photon energy and angles
             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
@@ -182,119 +182,6 @@ classdef mbe_toolbox
             x = analyze_xrr_with_fit(th,intensity,hv,layer,x0,ub,lb,isfixed);
         end
         
-        function [RR]    = simulate_xrr(layer,th,hv,thickness,filling,roughness,method)
-            %
-            % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
-            % 
-            % layers [struct]           layers
-            %    layer(i).mass_density      [g/cm^3]        mass density
-            %    layer(i).Z                 [Z]             atomic species
-            %    layer(i).stoichiometry     [atoms/u.c.]    number of atoms per formula unit
-            % th        [deg]           angles
-            % thickness [nm]            thickness
-            % filling   [unitless]      multiplies density
-            % roughness [nm]            inteface roughness
-            % method    [1,2]           transfer matrix (explicit,slow), recursive parratt (default,fast)
-            
-            import mbe_toolbox.*
-            
-            if nargin < 7
-                method = 2;
-            end
-
-            switch method
-                case 1 % explicit transfer matrix (slower)
-                    % number of layers
-                    nlayers = numel(layer);
-                    lambda = get_photon_wavelength(hv);
-                    get_qx = @(th,hv) 4*pi/lambda*cosd(th);
-
-                    % [nths,nlayers] solve wavevector boundary conditions to get
-                    % out-of-plane wavevector component in layer kz [nths,nlayers].
-                    % 1. k2  = (n2/n1) k1 ; equivalently, n1 sin(theta_1) = n2 sin(theta_2)
-                    % 2. k1x = k2x  
-                    nths = numel(th); kz = zeros(nths,nlayers);
-                    get_kz_in_layer = @(n1,n2,k1z,k1x) sqrt( (n2./n1).^2 .* k1z.^2 + ((n2./n1).^2-1) .* k1x.^2 );
-                    for i = 1:nlayers
-                        kz(:,i) = get_kz_in_layer(1,filling(i)*(layer(i).xray_refractive_index(:)-1)+1,get_qz(th,hv),get_qx(th,hv));
-                    end
-
-                    % get transfer matricies R and T which describe propagation
-                    % across interfaces and media
-                    % syms a b c d k1 k2 z
-                    % % boundary conditions for plane waves at an interface
-                    % eq(1) = a * exp(1i*k1*z) + b * exp(-1i*k1*z) == c*exp(1i*k2*z) + d*exp(-1i*k2*z);
-                    % eq(2) = diff(eq(1),z);
-                    % solution = solve(eq,a,b);
-                    % % transfer matrix
-                    % T(1,1:2) = simplify(equationsToMatrix(solution.a,c,d));
-                    % T(2,1:2) = simplify(equationsToMatrix(solution.b,c,d));
-                    % % set interface at 0 for simplicity
-                    % T = subs(T,z,0)
-                    % simplify
-                    % T = simplify(expand(T));
-                    %
-                    get_transfer_matrix_at_interface = @(k1,k2,sigma) [ ...
-                        [ (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1), (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1)]
-                        [ (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1), (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1)] ];
-
-                    get_transfer_matrix_in_medium = @(k,l) [ ...
-                            [ exp(-1i*k*l), 0]
-                            [ 0, exp(+1i*k*l)]];
-
-                    % get reflection at each theta value; NOTE: A factor of .5 is required here for thickness and roughness to get curve from methods 1 and 2 to match.
-                    RR = zeros(1,nths);
-                    for j = 1:nths
-                        % vacuum/first layer
-                        M =     get_transfer_matrix_at_interface(get_qz(th(j),hv), kz(j,1), .5*roughness(1) );
-                        M = M * get_transfer_matrix_in_medium(                     kz(j,1), .5*thickness(1) );
-                        % first layer ... nth layer
-                        if nlayers > 1
-                            for i = 2:nlayers
-                                M = M * get_transfer_matrix_at_interface( kz(j,i-1)  , kz(j,i), .5*roughness(i) );
-                                M = M * get_transfer_matrix_in_medium(                 kz(j,i), .5*thickness(i) );
-                            end
-                        end
-                        RR(j) = abs(M(2,1)./M(1,1)).^2;
-                    end
-                    
-                case 2 % recursive Parratt method without transfer matrix (faster)
-                    % number of layers
-                    nlayers = numel(layer);
-                    lambda = get_photon_wavelength(hv);
-                    th2kz = @(th,lambda) 4*pi/lambda .* sind(th(:));
-                    %----- Wavevector transfer in each layer
-                    nths = numel(th); Q = zeros(nlayers,nths);
-                    Q(1,:) = th2kz(th,lambda);
-                    for j=1:nlayers
-                        Q(j+1,:)= sqrt(Q(1,:).^2 + 2*(4*pi/lambda).^2 * (layer(j).xray_refractive_index(:).'-1) * filling(j) );
-                    end
-                    %----- Reflection coefficients (no multiple scattering)
-                    r = zeros(nlayers,nths);
-                    for j=1:nlayers
-                        r(j,:)=(  (Q(j,:)-Q(j+1,:))./(Q(j,:)+Q(j+1,:)) ) .* exp(-0.5*(Q(j,:).*Q(j+1,:))*roughness(j)^2);
-                    end
-                    %----- Reflectivity
-                    R = zeros(nlayers-1,nths);
-                    if nlayers>1
-                        R(1,:) =  (r(nlayers-1,:)  + r(nlayers,:) .* exp(1i*Q(nlayers,:)*thickness(nlayers-1)) ) ...
-                              ./(1+r(nlayers-1,:) .* r(nlayers,:) .* exp(1i*Q(nlayers,:)*thickness(nlayers-1)) );
-                    end
-                    if nlayers>2
-                    for j=2:nlayers-1
-                        R(j,:) =  (r(nlayers-j,:)  + R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*thickness(nlayers-j)) ) ...
-                              ./(1+r(nlayers-j,:) .* R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*thickness(nlayers-j)) );
-                    end
-                    end
-                    %------ Intensity reflectivity
-                    if nlayers==1
-                        RR=abs(r(1,:)).^2;
-                    else
-                        RR=abs(R(nlayers-1,:)).^2;
-                    end
-            end
-        end
-
         function           analyze_xrr_with_fft(th,intensity,hv,thc)
             %
             % beta = analyze_xrr_with_fft(th,xrr,hv,thc)
@@ -310,7 +197,7 @@ classdef mbe_toolbox
             % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv)
             %
 
-            import mbe_toolbox.*
+            import am_mbe.*
 
             if nargin < 4
                 qc = [];
@@ -347,7 +234,7 @@ classdef mbe_toolbox
         function [x]     = analyze_xrr_with_fit(th,intensity,hv,layer,x0,ub,lb,isfixed,domain)
             %
             
-            import mbe_toolbox.*
+            import am_mbe.*
             
             % if window is defined, crop and filter
             if nargin > 8
@@ -436,7 +323,7 @@ classdef mbe_toolbox
             % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv)
             %
 
-            import mbe_toolbox.*
+            import am_mbe.*
             
             % resample intensity and q on equidistant intervals
             q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
@@ -470,7 +357,7 @@ classdef mbe_toolbox
             % domain     [deg]          (optional) [min max]
             %
 
-            import mbe_toolbox.*
+            import am_mbe.*
             
             % resample intensity and q on equidistant intervals
             q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
@@ -536,6 +423,121 @@ classdef mbe_toolbox
             end
         end
         
+        function [intensity] = simulate_xrr(layer,th,hv,thickness,filling,roughness,method)
+            %
+            % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
+            % 
+            % layers [struct]           layers
+            %    layer(i).mass_density      [g/cm^3]        mass density
+            %    layer(i).Z                 [Z]             atomic species
+            %    layer(i).stoichiometry     [atoms/u.c.]    number of atoms per formula unit
+            % th        [deg]           angles
+            % thickness [nm]            thickness
+            % filling   [unitless]      multiplies density
+            % roughness [nm]            inteface roughness
+            % method    [1,2]           transfer matrix (explicit,slow), recursive parratt (default,fast)
+            
+            import am_mbe.*
+            
+            if nargin < 7
+                method = 2;
+            end
+
+            switch method
+                case 1 % explicit transfer matrix (slower)
+                    
+                    % get kx and kz
+                    % Note: k are incident wavevectors and not diffraction vectors
+                    lambda = get_photon_wavelength(hv);
+                    get_kz = @(th,hv) 2*pi/lambda*sind(th);
+                    get_kx = @(th,hv) 2*pi/lambda*cosd(th);
+
+                    % [nths,nlayers] solve wavevector boundary conditions to get
+                    % out-of-plane wavevector component in layer kz [nths,nlayers]
+                    % 1. k2  = (n2/n1) k1  is  snell's law
+                    % 2. k1x = k2x        
+                    nlayers = numel(layer); nths = numel(th); kz = zeros(nths,nlayers);
+                    get_kz_in_layer = @(n1,n2,k1z,k1x) sqrt( (n2./n1).^2 .* k1z.^2 + ((n2./n1).^2-1) .* k1x.^2 );
+                    for i = 1:nlayers
+                        kz(:,i) = get_kz_in_layer(1,filling(i)*(layer(i).xray_refractive_index(:)-1)+1,get_kz(th,hv),get_kx(th,hv));
+                    end
+
+                    % get transfer matricies R and T which describe propagation
+                    % across interfaces and media
+                    % syms a b c d k1 k2 z
+                    % % boundary conditions for plane waves at an interface
+                    % eq(1) = a * exp(1i*k1*z) + b * exp(-1i*k1*z) == c*exp(1i*k2*z) + d*exp(-1i*k2*z);
+                    % eq(2) = diff(eq(1),z);
+                    % solution = solve(eq,a,b);
+                    % % transfer matrix
+                    % T(1,1:2) = simplify(equationsToMatrix(solution.a,c,d));
+                    % T(2,1:2) = simplify(equationsToMatrix(solution.b,c,d));
+                    % % set interface at 0 for simplicity
+                    % T = subs(T,z,0)
+                    % simplify
+                    % T = simplify(expand(T));
+                    %
+                    get_transfer_matrix_at_interface = @(k1,k2,sigma) [ ...
+                        [ (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1), (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1)]
+                        [ (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1), (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1)] ];
+
+                    get_transfer_matrix_in_medium = @(k,l) [ ...
+                            [ exp(-1i*k*l), 0]
+                            [ 0, exp(+1i*k*l)]];
+
+                    % get reflection at each theta value
+                    intensity = zeros(1,nths);
+                    for j = 1:nths
+                        % vacuum/first layer
+                        M =     get_transfer_matrix_at_interface(get_kz(th(j),hv)    , kz(j,1), roughness(1) );
+                        M = M * get_transfer_matrix_in_medium(                         kz(j,1), thickness(1) );
+                        % first layer ... nth layer
+                        if nlayers > 1
+                            for i = 2:nlayers
+                                M = M * get_transfer_matrix_at_interface( kz(j,i-1)  , kz(j,i), roughness(i) );
+                                M = M * get_transfer_matrix_in_medium(                 kz(j,i), thickness(i) );
+                            end
+                        end
+                        intensity(j) = abs(M(2,1)./M(1,1)).^2;
+                    end
+                    
+                case 2 % recursive Parratt method without transfer matrix (faster)
+                    % number of layers
+                    nlayers = numel(layer);
+                    lambda = get_photon_wavelength(hv);
+                    th2kz = @(th,lambda) 4*pi/lambda .* sind(th(:));
+                    %----- Wavevector transfer in each layer
+                    nths = numel(th); Q = zeros(nlayers,nths);
+                    Q(1,:) = th2kz(th,lambda);
+                    for j=1:nlayers
+                        Q(j+1,:)= sqrt(Q(1,:).^2 + 2*(4*pi/lambda).^2 * (layer(j).xray_refractive_index(:).'-1) * filling(j) );
+                    end
+                    %----- Reflection coefficients (no multiple scattering)
+                    r = zeros(nlayers,nths);
+                    for j=1:nlayers
+                        r(j,:)=(  (Q(j,:)-Q(j+1,:))./(Q(j,:)+Q(j+1,:)) ) .* exp(-0.5*(Q(j,:).*Q(j+1,:))*roughness(j)^2);
+                    end
+                    %----- Reflectivity
+                    R = zeros(nlayers-1,nths);
+                    if nlayers>1
+                        R(1,:) =  (r(nlayers-1,:)  + r(nlayers,:) .* exp(1i*Q(nlayers,:)*thickness(nlayers-1)) ) ...
+                              ./(1+r(nlayers-1,:) .* r(nlayers,:) .* exp(1i*Q(nlayers,:)*thickness(nlayers-1)) );
+                    end
+                    if nlayers>2
+                    for j=2:nlayers-1
+                        R(j,:) =  (r(nlayers-j,:)  + R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*thickness(nlayers-j)) ) ...
+                              ./(1+r(nlayers-j,:) .* R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*thickness(nlayers-j)) );
+                    end
+                    end
+                    %------ Intensity reflectivity
+                    if nlayers==1
+                        intensity = abs(r(1,:)).^2;
+                    else
+                        intensity = abs(R(nlayers-1,:)).^2;
+                    end
+            end
+        end
+
         function [thc]   = get_xray_critical_angle(delta)
             %
             % thc = photoabsorbtion_crosssection(Z,lambda)
@@ -564,10 +566,10 @@ classdef mbe_toolbox
             % Atomic Data and Nuclear Data Tables 54, 181 (1993). 
             %
             
-            import mbe_toolbox.*
+            import am_mbe.*
             
             [f0,f1,f2] = get_atomic_xray_form_factor(Z,hv,th); % [nZs,nhvs,nths]
-            n = 1 - mbe_toolbox.r_0 ./ (2*pi) .* get_photon_wavelength(hv).^2 .* sum(( + f0 + f1 - f2*1i ).*atomic_density(:),1);
+            n = 1 - am_mbe.r_0 ./ (2*pi) .* get_photon_wavelength(hv).^2 .* sum(( + f0 + f1 - f2*1i ).*atomic_density(:),1);
             n = permute(n,[3,2,1]); % [nhvs,nths]
         end
 
@@ -581,7 +583,7 @@ classdef mbe_toolbox
             % hv             [eV]           photon energy
             %
 
-            import mbe_toolbox.*
+            import am_mbe.*
             
             mu = (4*pi) * get_xray_dielectric_function_beta(Z,atomic_density,hv) / get_photon_wavelength(hv);
             
@@ -589,7 +591,7 @@ classdef mbe_toolbox
 
         function [qz]    = get_qz(th,hv)
             
-            import mbe_toolbox.*
+            import am_mbe.*
             
             qz = 4*pi/get_photon_wavelength(hv) * sind(th);
             
@@ -597,7 +599,7 @@ classdef mbe_toolbox
 
         function [th]    = get_th(qz,hv)
             
-            import mbe_toolbox.*
+            import am_mbe.*
             
             th = asind( get_photon_wavelength(hv)*qz/(4*pi) );
             
@@ -605,7 +607,7 @@ classdef mbe_toolbox
         
         function [th2]   = get_bragg_angle(hv,a,hkl)
             
-            import mbe_toolbox.*
+            import am_mbe.*
             
             lambda = get_photon_wavelength(hv);
             
@@ -622,7 +624,7 @@ classdef mbe_toolbox
         
         function [layer] = define_material(species,stoichiometry,mass_density)
 
-            import mbe_toolbox.*
+            import am_mbe.*
 
             define_layer = @(species,stoichiometry,mass_density) struct(...
                 'species',{species},'Z',get_atomic_number(species),...
@@ -636,6 +638,11 @@ classdef mbe_toolbox
             layer.atomic_density = layer.mass_density / layer.molecular_weight * 602.24;
 
         end
+        
+        function [h]     = cubic2hex(a)
+            % hexagonal in-plane lattice parameter for 111-oriented of a cubic material
+            h = a/sqrt(1-cosd(120));
+            
         
     end
     
@@ -758,7 +765,7 @@ classdef mbe_toolbox
             %
             % using f0 values computed from Cromer Mann coefficients.
             
-            import mbe_toolbox.*
+            import am_mbe.*
             
             nZs = numel(Z); nths = numel(th); nhvs = numel(hv); 
             f0 = zeros(nZs,nhvs,nths); f1 = zeros(nZs,nhvs,nths); f2 = zeros(nZs,nhvs,nths);
