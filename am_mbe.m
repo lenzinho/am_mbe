@@ -261,7 +261,6 @@ classdef am_mbe
             cost_  = @(x) sum(abs( log(simulate_(rscale_(x))).' - log(intensity(:)) )) ;
 
             % optimization options
-            warning('off','globaloptim:mutationgaussian:shrinkFactor');
             opts_hybrid_ = optimoptions(...
                 @fmincon,'Display','off',...
                          'MaxFunctionEvaluations',1E3,...
@@ -347,7 +346,7 @@ classdef am_mbe
             subplot(2,1,2); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200]);
         end
         
-        function [d,th2] = analyze_xrd_with_fit(th2,intensity,hv,domain)
+        function [d,th2] = analyze_xrd_with_fit(th2,intensity,hv,domain,profile)
             %
             % beta = analyze_xrd_with_fit(th,xrr,hv)
             % 
@@ -360,28 +359,50 @@ classdef am_mbe
             import am_mbe.*
             
             % resample intensity and q on equidistant intervals
-            q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
+            q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; 
+            intensity = interp1(q,intensity,qe); intensity(intensity==0)=min(intensity(intensity~=0)); %intensity = intensity./max(intensity);
+            q = qe; th2 = get_th(q,hv)*2;
             % if window is defined, crop and filter
             if nargin > 3
                 ex_ = and( th2 < max(domain) , th2 > min(domain) );
-                th2 = th2(ex_); q = q(ex_); Fq = Fq(ex_);
+                th2 = th2(ex_); q = q(ex_); intensity = intensity(ex_);
             else 
                 ex_ = true;
             end
-            % define gaussian, sinc, peak, and objective functions
-            gaus_ = @(x) x(1).*exp(-((q-x(2))./x(3)).^2);
-            sinc_ = @(x) x(1).*sinc( (q-x(2)).*x(3)).^2 ;
-            func_ = @(x) sinc_(x(1:3))+gaus_(x(4:6)) + x(7);
-            objf_ = @(x) sum(abs(log(func_(x)) - log(Fq./max(Fq)) )) ;
-            nvars = 7; % nargin(objf_);
-            % guess substrate position
-            [~,j]=max(Fq); q_sub = q(j);
-            % lower and upper bounds; starting condition
-            LB = [0 min(q)  0 1 q_sub-0.1 0 0];
-            UB = [1 max(q) 10 1 q_sub+0.1 1 1];
-            X0 = mean([LB;UB]); X0(3) = 0; X0(end) = 1E-4;
+            if nargin > 4
+                profile='f';
+            end
+            if      contains(profile,'fs')
+                % define rescaling
+                fscale_= @(x) [log(x(1)),x(2:3),log(x(4)),x(5:6),log(x(7))];
+                rscale_= @(x) [exp(x(1)),x(2:3),exp(x(4)),x(5:6),exp(x(7))];
+                % define gaussian, sinc, peak, and objective functions
+                gaus_ = @(x) x(1).*exp(-((q-x(2))./x(3)).^2);
+                sinc_ = @(x) x(1).*sinc( (q-x(2)).*x(3)).^2 ;
+                func_ = @(x) sinc_(x(1:3))+gaus_(x(4:6)) + x(7);
+                cost_ = @(x) sum(abs(log(func_(rscale_(x))) - log(intensity(:)) ));
+                % guess substrate position
+                [~,i]=max(intensity); q_sub = q(i);
+                % lower and upper bounds; starting condition
+                isfixed = [0 0 0 0 0 0 0];
+                lb = [1E-6 min(q)  0 1E-1 q_sub-0.1 0.1 1E-6]; lb = fscale_(lb); 
+                ub = [1E+6 max(q) 10 1E+9 q_sub+0.1 1.0 1E-4]; ub = fscale_(ub);
+                x0 = mean([lb;ub]);
+            elseif contains(profile,'f')
+                % define rescaling
+                fscale_= @(x) [log10(x(1)),x(2:3),log10(x(4))];
+                rscale_= @(x) [ 10.^(x(1)),x(2:3), 10.^(x(4))];
+                % define gaussian, sinc, peak, and objective functions
+                sinc_ = @(x) x(1).*sinc( (q-x(2)).*x(3)).^2;
+                func_ = @(x) sinc_(x(1:3)) + x(4);
+                cost_ = @(x) sum(abs(log(func_(rscale_(x))) - log(intensity(:)) ));
+                % lower and upper bounds; starting condition
+                isfixed = [0 0 0 0];
+                lb = [1E-6 min(q)  5/2/pi 1E-6]; lb = fscale_(lb); 
+                ub = [1E6  max(q) 50/2/pi 1E-4]; ub = fscale_(ub);
+                x0 = mean([lb;ub]);
+            end
             % optimization options
-            warning('off','globaloptim:mutationgaussian:shrinkFactor');
             opts_hybrid_ = optimoptions(...
                 @fmincon,'Display','off',...
                          'MaxFunctionEvaluations',1E3,...
@@ -389,19 +410,24 @@ classdef am_mbe
                          'StepTolerance',1E-18,...
                          'FunctionTolerance',1E-18,...
                          'Algorithm','active-set');
-            opts_ = optimoptions(@ga,'PopulationSize',2000, ...
-                                     'InitialPopulationMatrix',X0, ...
-                                     'MutationFcn',{@mutationgaussian, 2,0.2}, ...
-                                     'EliteCount',5, ...
-                                     'FunctionTolerance', 5, ...
+            opts_ = optimoptions(@ga,'PopulationSize',100, ...
+                                     'InitialPopulationMatrix',x0(~isfixed), ...
+                                     'MutationFcn',{@mutationadaptfeasible}, ...
+                                     'EliteCount',1, ...
+                                     'FunctionTolerance',1E-5, ...
                                      'Display','off',...
                                      'PlotFcns',{@plot_func_},...
                                      'HybridFcn',{@fmincon,opts_hybrid_});
-            [x,~] = ga(objf_,nvars,[],[],[],[],LB,UB,[],opts_);
+            % perform optimization
+            [x,~] = ga_(cost_,x0,isfixed,[],[],[],[],lb(~isfixed),ub(~isfixed),[],opts_); x = rscale_(x);
+            
+            figure(1); clf; set(gcf,'color','w');
+            semilogy(th2,intensity,'.',th2,func_(x),'--');
+            axis tight; xlabel('2\theta [deg]'); ylabel('Intensity [a.u.]');
             
             % output
             d = 2*pi*x(3); % thickness [nm]
-            th2 = get_th(x(2),hv); % 2theta peak position [deg]
+            th2 = 2*get_th(x(2),hv); % 2theta peak position [deg]
             
             function state = plot_func_(~,state,flag,~)
                 
@@ -411,14 +437,20 @@ classdef am_mbe
                         clf; figure(1); set(gcf,'color','w');
                     case 'iter'
                         % find best population
-                        [~,i]=min(state.Score);
+                        [~,j]=min(state.Score);
+                        % reconstruct full vector
+                        f = find( isfixed); xf = x0(f);
+                        l = find(~isfixed); xl = state.Population(j,:);
+                        x([f,l]) = [xf,xl];
                         % plot it
-                        semilogy(th2,func_(state.Population(i,:)),th2,Fq./max(Fq)); 
-                        %
+                        semilogy(th2,func_(rscale_(x)),th2,intensity); 
+                        % title
+                        title(sprintf('(generation = %i)',state.Generation)); 
+                        % state.Population(i,3), 2*asind(1239.842/hv/(4*pi)*state.Population(i,2))
                         title(sprintf('thickness = %2.2f nm   2th = %2.3f deg   (generation = %i)',...
-                            2*pi*state.Population(i,3), 2*asind(1239.842/hv/(4*pi)*state.Population(i,2)),state.Generation )); 
+                            2*pi*state.Population(j,3), 2*asind(1239.842/hv/(4*pi)*state.Population(j,2)),state.Generation )); 
                         axis tight; xlabel('2\theta [deg]'); ylabel('intensity [a.u.]');
-                        ylim([min(Fq),max(Fq)]./max(Fq));
+                        %ylim([min(intensity),max(intensity)]);
                 end
             end
         end
@@ -538,6 +570,30 @@ classdef am_mbe
             end
         end
 
+        function [h]     = plot_bragg_reflections(uc)
+            import am_mbe.*
+            import am_lib.*
+            % generate hkl list
+            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
+            hkl = permn_([0:4],3).'; hkl=hkl(:,2:end); k = hkl; k_mag = normc_(inv(uc.bas).'*k);
+            [~,i] = unique(rnd_(k_mag)); k=k(:,i); k_mag=k_mag(:,i); hkl=hkl(:,i);
+            th2 = 2*asind( get_photon_energy(hv) * k_mag / 2 * 10 ); ex_ = abs(imag(th2(:)))<1E-8; 
+            k=k(:,ex_); hkl=hkl(:,ex_); th2=th2(ex_);
+            % get atomic scattering factors and structure factor
+            [Z,~,j] = unique(get_atomic_number({uc.symb{uc.species}}));
+            f0 = permute(get_atomic_xray_form_factor(Z,hv,th2),[1,3,2]);
+            Fhkl = sum(f0(j,:).*exp(2i*pi*uc.tau.'*k),1); 
+            Fhkl2= abs(Fhkl).^2; ex_ = abs(Fhkl)>1E-5;% Fhkl2 = Fhkl2./max(Fhkl2(:));
+            % plot Bragg peaks
+            h = hggroup;
+            plot(th2(ex_),Fhkl2(ex_),'.','markersize',10,'Parent',h); hold on;
+            for i = 1:numel(th2); if ex_(i)
+                line([th2(i),th2(i)],[0,Fhkl2(i)],'Parent',h);
+                text(th2(i),Fhkl2(i),sprintf('  %i%i%i',hkl(:,i)),'Rotation',90,'Parent',h);
+            end; end
+            hold off;
+        end
+        
         function [thc]   = get_xray_critical_angle(delta)
             %
             % thc = photoabsorbtion_crosssection(Z,lambda)
@@ -644,6 +700,7 @@ classdef am_mbe
             h = a/sqrt(1-cosd(120));
             
         
+        end
     end
     
     % atom-related things
@@ -767,8 +824,7 @@ classdef am_mbe
             
             import am_mbe.*
             
-            nZs = numel(Z); nths = numel(th); nhvs = numel(hv); 
-            f0 = zeros(nZs,nhvs,nths); f1 = zeros(nZs,nhvs,nths); f2 = zeros(nZs,nhvs,nths);
+            nZs = numel(Z); nths = numel(th); nhvs = numel(hv); f0 = zeros(nZs,nhvs,nths); 
             for i = 1:nZs
                 % get f0 analytically from Cromer-Mann coefficients
                 CM = get_atomic_cromer_mann_coefficients(Z(i));
@@ -777,16 +833,21 @@ classdef am_mbe
                 for j = 1:nhvs
                     f0(i,j,:) = sum( ai .* exp( - bi .* (sind(th)./get_photon_wavelength(hv(j))).^2 ) , 3) + CM(9);
                 end
-                
-                % get f1 and f2 by interpolation
-                symb = get_atomic_symbol(Z);
-                fid = fopen(['data_atomic_scattering_factor/',strtrim(lower(symb{i})),'.nff']);
-                    [~] = fgetl(fid); buffer = reshape(fscanf(fid,'%f'),3,[]).';
-                fclose(fid);
+            end
+            
+            if nargout > 1
+                f1 = zeros(nZs,nhvs,nths); f2 = zeros(nZs,nhvs,nths);
+                for i = 1:nZs
+                    % get f1 and f2 by interpolation
+                    symb = get_atomic_symbol(Z);
+                    fid = fopen(['data_atomic_scattering_factor/',strtrim(lower(symb{i})),'.nff']);
+                        [~] = fgetl(fid); buffer = reshape(fscanf(fid,'%f'),3,[]).';
+                    fclose(fid);
 
-                for j = 1:nhvs
-                    f1(i,j,:) = interp1(buffer(:,1),buffer(:,2),hv(j)) - f0(i,j,:);
-                    f2(i,j,:) = interp1(buffer(:,1),buffer(:,3),hv(j));
+                    for j = 1:nhvs
+                        f1(i,j,:) = interp1(buffer(:,1),buffer(:,2),hv(j)) - f0(i,j,:);
+                        f2(i,j,:) = interp1(buffer(:,1),buffer(:,3),hv(j));
+                    end
                 end
             end
             
