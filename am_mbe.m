@@ -568,6 +568,13 @@ classdef am_mbe
                         intensity = abs(R(nlayers-1,:)).^2;
                     end
             end
+            
+            % add intensity correction due to finite sample width
+            h = 0.1; % [mm] height of x-ray beam
+            L = 10;  % [mm] length of sample
+            th_b = asind(h/L);
+            intensity(th<th_b) = sind(th(th<th_b)) ./ sind(th_b) .* intensity(th<th_b);
+            
         end
 
         function [h]     = plot_bragg_reflections(uc)

@@ -1,88 +1,77 @@
 function varargout = am_PDFcard(varargin)
-% AM_PDFCARD Application M-file for am_PDFcard.fig
-%   AM_PDFCARD, by itself, creates a new AM_PDFCARD or raises the existing
-%   singleton*.
-%
-%   H = AM_PDFCARD returns the handle to a new AM_PDFCARD or the handle to
-%   the existing singleton*.
-%
-%   AM_PDFCARD('CALLBACK',hObject,eventData,handles,...) calls the local
-%   function named CALLBACK in AM_PDFCARD.M with the given input arguments.
-%
-%   AM_PDFCARD('Property','Value',...) creates a new AM_PDFCARD or raises the
-%   existing singleton*.  Starting from the left, property value pairs are
-%   applied to the GUI before lbox2_OpeningFunction gets called.  An
-%   unrecognized property name or invalid value makes property application
-%   stop.  All inputs are passed to am_PDFcard_OpeningFcn via varargin.
-%
-%   *See GUI Options - GUI allows only one instance to run (singleton).
-%
-% See also: GUIDE, GUIDATA, GUIHANDLES
-
-% Copyright 2000-2006 The MathWorks, Inc.
-
-% Edit the above text to modify the response to help am_PDFcard
-
-% Last Modified by GUIDE v2.5 31-Jul-2017 22:04:37
-
-% Begin initialization code - DO NOT EDIT
-gui_Singleton = 1;
-gui_State = struct('gui_Name',          mfilename, ...
-                   'gui_Singleton',     gui_Singleton, ...
-                   'gui_OpeningFcn',    @am_PDFcard_OpeningFcn, ...
-                   'gui_OutputFcn',     @am_PDFcard_OutputFcn, ...
-                   'gui_LayoutFcn',     [], ...
-                   'gui_Callback',      []);
-if nargin && ischar(varargin{1})
-   gui_State.gui_Callback = str2func(varargin{1});
-end
-
-if nargout
-    [varargout{1:nargout}] = gui_mainfcn(gui_State, varargin{:});
-else
-    gui_mainfcn(gui_State, varargin{:});
-end
-% End initialization code - DO NOT EDIT
-
-
-% --- Executes just before am_PDFcard is made visible.
-function am_PDFcard_OpeningFcn(hObject, eventdata, handles, varargin)
-handles.output = hObject;
-guidata(hObject, handles);
-if nargin == 3
-    initial_dir = pwd;
-elseif nargin > 4
-    if strcmpi(varargin{1},'dir')
-        if exist(varargin{2},'dir')
-            initial_dir = varargin{2};
-        else
-            errordlg('Input argument must be a valid directory','Input Argument Error!')
-            return
-        end
+    gui_Singleton = 1;
+    gui_State = struct('gui_Name',          mfilename, ...
+                       'gui_Singleton',     gui_Singleton, ...
+                       'gui_OpeningFcn',    @am_PDFcard_OpeningFcn, ...
+                       'gui_OutputFcn',     @am_PDFcard_OutputFcn, ...
+                       'gui_LayoutFcn',     [], ...
+                       'gui_Callback',      []);
+    if nargin && ischar(varargin{1})
+       gui_State.gui_Callback = str2func(varargin{1});
+    end
+    
+    if nargout
+        [varargout{1:nargout}] = gui_mainfcn(gui_State, varargin{:});
     else
-        errordlg('Unrecognized input argument','Input Argument Error!');
-        return;
+        gui_mainfcn(gui_State, varargin{:});
     end
 end
 
-load_listbox(initial_dir,handles)
+% --- Executes just before am_PDFcard is made visible.
+function am_PDFcard_OpeningFcn(hObject, eventdata, handles, varargin)
+    handles.output = hObject;
+    guidata(hObject,handles);
+    if nargin == 3
+        initial_dir = pwd;
+    elseif nargin > 4
+        if strcmpi(varargin{1},'dir')
+            if exist(varargin{2},'dir')
+                initial_dir = varargin{2};
+            else
+                errordlg('Input argument must be a valid directory','Input Argument Error!')
+                return
+            end
+        else
+            errordlg('Unrecognized input argument','Input Argument Error!');
+            return;
+        end
+    end
+    load_listbox(initial_dir,handles);
+end
 
 % --- Outputs from this function are returned to the command line.
 function varargout = am_PDFcard_OutputFcn(hObject, eventdata, handles)
-varargout{1} = handles.output;
+    varargout{1} = handles.output;
+end
 
-% ------------------------------------------------------------
-% Callback for list box - open .fig with guide, otherwise use open
-% ------------------------------------------------------------
+function listbox1_CreateFcn(hObject, eventdata, handles) 
+    set(hObject,'BackgroundColor','white');
+end
+
+function figure1_CreateFcn(hObject, eventdata, handles)
+    set(hObject,'color','w'); setappdata(hObject, 'StartPath', pwd); addpath(pwd);
+end
+
+function figure1_DeleteFcn(hObject, eventdata, handles)
+    if isappdata(hObject, 'StartPath'); rmpath(getappdata(hObject, 'StartPath')); end
+end
+
+function axes1_CreateFcn(hObject, eventdata, handles)
+    set(hObject,'color','w');
+    handles.axes1.YScale='log';
+    handles.axes1.YLabel.String='Intensity';
+    handles.axes1.XLabel.String='2\theta [deg]';
+end
+
+function edit1_CreateFcn(hObject, eventdata, handles)
+    set(hObject,'BackgroundColor','white'); hObject.String={''};
+end
+
 function listbox1_Callback(hObject, eventdata, handles)
-
     import am_dft.*
-
     index_selected = get(handles.listbox1,'Value');
     file_list = get(handles.listbox1,'String');
     filename = file_list{index_selected};
-    [path,name,ext] = fileparts(filename);
-
     if     strcmp(get(handles.figure1,'SelectionType'),'normal')
         if contains(ext,'poscar')
             uc = load_poscar(filename);
@@ -91,11 +80,12 @@ function listbox1_Callback(hObject, eventdata, handles)
     %         handles.axes1.YLabel.String='Intensity';
         end
     elseif strcmp(get(handles.figure1,'SelectionType'),'open')
-        if  handles.is_dir(handles.sorted_index(index_selected))
-            cd(filename)
-            load_listbox(pwd,handles)
+        if  handles.is_dir(index_selected)
+            cd(filename);
+            load_listbox(pwd,handles);
         end
     end
+end
 
 function [h]     = plot_millers(h,uc)
     %
@@ -119,49 +109,62 @@ function [h]     = plot_millers(h,uc)
         line(h,[th2(i),th2(i)],[0,Fhkl2(i)]);
         text(h,th2(i),Fhkl2(i),sprintf('  %i%i%i',hkl(:,i)),'Rotation',90);
     end; end
+end
 
 % ------------------------------------------------------------
 % Read the current directory and sort the names
 % ------------------------------------------------------------
 function load_listbox(dir_path,handles)
-    cd (dir_path)
-    dir_struct = dir(dir_path);
-    [sorted_names,sorted_index] = sortrows({dir_struct.name}');
-    handles.file_names = sorted_names;
-    handles.is_dir = [dir_struct.isdir];
-    handles.sorted_index = sorted_index;
-    guidata(handles.figure1,handles)
-    set(handles.listbox1,'String',handles.file_names,...
-        'Value',1)
-
-
-% --- Executes during object creation, after setting all properties.
-function listbox1_CreateFcn(hObject, eventdata, handles) 
-    usewhitebg = 1;
-    if usewhitebg
-        set(hObject,'BackgroundColor','white');
+    cd(dir_path);
+    dir_struct = dir(dir_path); file_names = {dir_struct.name}; isdir = [dir_struct.isdir];
+    element_txt = strtrim(handles.edit1.String);
+    if ~strcmp(element_txt,'')
+        % if not empty
+        element_list = strsplit(element_txt{:},' ');
+        % get files names
+        if handles.togglebutton2.Value==1
+            % any
+            ex_ = contains(file_names,element_list,'IgnoreCase',true);
+        else
+            % all
+            ex_ = true(1,numel(file_names));
+            for i = 1:numel(element_list)
+                ex_ = and(ex_,contains(file_names,element_list{i},'IgnoreCase',true));
+            end
+        end
     else
-        set(hObject,'BackgroundColor',get(groot,'defaultUicontrolBackgroundColor'));
+        % no filter
+        ex_ = true(1,numel(file_names));
     end
+    % append directories
+    ex_ = or( ex_, isdir );
+    % remove hidden files 
+    ex_ = and( ex_, ~startsWith(file_names,'.') );
+    % append . and ..
+    ex_ = or( ex_, strcmp(file_names,'.') );
+    ex_ = or( ex_, strcmp(file_names,'..'));
+    % sort by name and put directories first
+    [~,handles.sorted_index] = sortrows( strcat(num2cell((~isdir)*1+48).',{dir_struct.name}.') );
+    % filter based on ex_
+    ex_ = ex_(handles.sorted_index);
+    handles.file_names = file_names(handles.sorted_index); 
+    handles.file_names = handles.file_names(ex_);
+    handles.is_dir     = [dir_struct.isdir];
+    handles.is_dir     = handles.is_dir(handles.sorted_index);
+    handles.is_dir     = handles.is_dir(ex_);
+    guidata(handles.figure1,handles)
+    set(handles.listbox1,'String',handles.file_names,'Value',1)
+end
 
+function edit1_Callback(hObject, eventdata, handles)
+    load_listbox(pwd,handles)
+end
 
-% --- Executes during object creation, after setting all properties.
-function figure1_CreateFcn(hObject, eventdata, handles)
-    set(hObject,'color','w');
-    setappdata(hObject, 'StartPath', pwd);
-    addpath(pwd);
-
-
-% --- Executes during object deletion, before destroying properties.
-function figure1_DeleteFcn(hObject, eventdata, handles)
-    if isappdata(hObject, 'StartPath')
-        rmpath(getappdata(hObject, 'StartPath'));
+function togglebutton2_Callback(hObject, eventdata, handles)
+    if hObject.Value == 1
+        hObject.String={'Any'};
+    else
+        hObject.String={'All'};
     end
-
-
-% --- Executes during object creation, after setting all properties.
-function axes1_CreateFcn(hObject, eventdata, handles)
-    set(hObject,'color','w');
-    set(hObject,'yscale','log');
-    hObject.XScale='log';
-    hObject.XLabel.String='2\theta [deg]';
+    load_listbox(pwd,handles)
+end
