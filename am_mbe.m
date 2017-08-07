@@ -136,9 +136,10 @@ classdef am_mbe
             simulate_ = @(x,method) simulate_xrr(layer,th,hv,...
                 x(0*nlayers+[1:nlayers]),...
                 x(1*nlayers+[1:nlayers]),...
-                x(2*nlayers+[1:nlayers]),method)*x(end-1)+x(end);
-            R_transfer = simulate_([thickness,filling,roughness,2,1E-3],1);
-            R_parratt  = simulate_([thickness,filling,roughness,2,1E-3],2);
+                x(2*nlayers+[1:nlayers]),...
+                x(3*nlayers+1),method)*x(end-1)+x(end);
+            R_transfer = simulate_([thickness,filling,roughness,10,2,1E-3],1);
+            R_parratt  = simulate_([thickness,filling,roughness,10,2,1E-3],2);
 
             % exclude above noise floor
             ex_ = th<1.8; ex_ = th>0;
@@ -174,9 +175,9 @@ classdef am_mbe
 %             layer(1) = define_material({'Ta','O'},[2,5],8.2);
             layer(2) = define_material({'Si'},[1],2.53);
             
-            isfixed = [  0   1   0   0 0 0 0      0];
-            lb      = [  0 1E8 0.6 0.6 0 0 1   1E-8];
-            ub      = [100 1E8 1.4 1.4 5 5 1E8 1E+2];
+            isfixed = [  0   1   0   0   0   0  0   0    0];
+            lb      = [  0 1E8 0.6 0.6 0.1 0.1  7   1 1E-8];
+            ub      = [100 1E8 1.4 1.4   5   5 13 1E8 1E+2];
             x0      = mean([lb;ub]);
             
             x = analyze_xrr_with_fit(th,intensity,hv,layer,x0,ub,lb,isfixed);
@@ -232,9 +233,8 @@ classdef am_mbe
         end
 
         function [x]     = analyze_xrr_with_fit(th,intensity,hv,layer,x0,ub,lb,isfixed,domain)
-            %
-            
             import am_mbe.*
+            import am_lib.*
             
             % if window is defined, crop and filter
             if nargin > 8
@@ -253,38 +253,57 @@ classdef am_mbe
             simulate_ = @(x) simulate_xrr(layer,th,hv,...
                 x(0*nlayers+[1:nlayers]),...
                 x(1*nlayers+[1:nlayers]),...
-                x(2*nlayers+[1:nlayers]))*x(end-1)+x(end);
+                x(2*nlayers+[1:nlayers]),...
+                x(3*nlayers+1))*x(end-1)+x(end);
             % define rescaling
-            fscale_= @(x)   [x(1:(3*nlayers)),log(x((3*nlayers+1):end))];
-            rscale_= @(x)   [x(1:(3*nlayers)),exp(x((3*nlayers+1):end))];
+            fscale_= @(x)   [x(1:(3*nlayers+1)),log(x((3*nlayers+2):end))];
+            rscale_= @(x)   [x(1:(3*nlayers+1)),exp(x((3*nlayers+2):end))];
+            % scale lower and upper bounds
+            lb = fscale_(lb); ub = fscale_(ub);
             % define objective function: robust + pearson's correlation coefficient
             cost_  = @(x) sum(abs( log(simulate_(rscale_(x))).' - log(intensity(:)) )) ;
 
-            % optimization options
-            opts_hybrid_ = optimoptions(...
-                @fmincon,'Display','off',...
-                         'MaxFunctionEvaluations',1E3,...
-                         'MaxIterations',1E3,...
-                         'StepTolerance',1E-18,...
-                         'FunctionTolerance',1E-18,...
-                         'Algorithm','active-set');
-            opts_ = optimoptions(@ga,'PopulationSize',500, ...
-                                     'InitialPopulationMatrix',x0(~isfixed), ...
-                                     'MutationFcn',{@mutationadaptfeasible}, ...
-                                     'EliteCount',1, ...
-                                     'FunctionTolerance',1, ...
-                                     'Display','off',...
-                                     'PlotFcns',{@plot_func_},...
-                                     'HybridFcn',{@fmincon,opts_hybrid_});
-            % perform optimization   
-            lb = fscale_(lb); ub = fscale_(ub);
-            [x,~] = ga_(cost_,x0,isfixed,[],[],[],[],lb(~isfixed),ub(~isfixed),[],opts_); x = rscale_(x);
+            switch 'GA'
+                case 'GA'
+                    % optimization options
+                    opts_hybrid_ = optimoptions(...
+                        @fmincon,'Display','off',...
+                                 'MaxFunctionEvaluations',1E3,...
+                                 'MaxIterations',1E3,...
+                                 'StepTolerance',1E-18,...
+                                 'FunctionTolerance',1E-18,...
+                                 'Algorithm','active-set');
+                    opts_ = optimoptions(@ga,'PopulationSize',200, ...
+                                             'InitialPopulationMatrix',x0(~isfixed), ...
+                                             'EliteCount',1, ...
+                                             'FunctionTolerance',1, ...
+                                             'Display','off',...
+                                             'PlotFcns',{@plot_func_ga_},...
+                                             'HybridFcn',{@fmincon,opts_hybrid_});
+                    % perform optimization
+                    [x,~] = ga_(cost_,x0,isfixed,[],[],[],[],lb(~isfixed),ub(~isfixed),[],opts_); x = rscale_(x);
+                case 'SA'
+                    % optimization options
+                    opts_hybrid_ = optimoptions(@fmincon,...
+                                 'Display','off',...
+                                 'MaxFunctionEvaluations',1E3,...
+                                 'MaxIterations',1E3,...
+                                 'StepTolerance',1E-18,...
+                                 'FunctionTolerance',1E-18,...
+                                 'Algorithm','active-set');
+                    opts_ = optimoptions(@simulannealbnd,...
+                                 'Display','off',...
+                                 'MaxIterations',100,...
+                                 'InitialTemperature',1.5*abs(ub(~isfixed)-lb(~isfixed)),...
+                                 'ReannealInterval',10,...
+                                 'FunctionTolerance',1E-18,...
+                                 'PlotFcns',{@plot_func_sa_},...
+                                 'HybridFcn',{@fmincon,opts_hybrid_});
+                    % perform optimization
+                    [x,~] = sa_(cost_,x0,isfixed,lb(~isfixed),ub(~isfixed),opts_);  x = rscale_(x);
+            end
             
-            figure(1); clf; set(gcf,'color','w');
-            semilogy(th,intensity,'.',th,simulate_(x),'--');
-            axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
-            
-            function state = plot_func_(~,state,flag,~)
+            function state = plot_func_ga_(~,state,flag,~)
                 switch flag
                     % Plot initialization
                     case 'init'
@@ -303,7 +322,64 @@ classdef am_mbe
                         % state.Population(i,3), 2*asind(1239.842/hv/(4*pi)*state.Population(i,2))
                         axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
                         ylim([min(intensity),max(intensity)]);
+                    case 'done'
+                        % initialize
+                        figure(1); clf; set(gcf,'color','w');
+                        % plot
+                        semilogy(th,intensity,'.',th,simulate_(rscale_(x)),'--');
+                        axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
+                        % title
+                        title(sprintf('thickness = %.2f nm; film density %.2f g/cm3; substrate density %.2f g/cm3; \n film roughness = %.2f nm, substrate roughness = %.2f nm',...
+                            x(1),x(3)*layer(1).mass_density,x(4)*layer(2).mass_density,x(5),x(6)));
+                        % define labels manually
+                        switch nlayers
+                            case 2; label = {'T1','T2','D1','D2','R1','R2','W','I','B'};
+                            case 3; label = {'T1','T2','T3','D1','D2','D3','R1','R2','R3','W','I','B'};
+                        end
+                        % bounds
+                        axes('position',[0.4 0.6 0.45 0.25]);
+                        a = 1:sum(~isfixed); b = (x(~isfixed)-lb(~isfixed))./(ub(~isfixed)-lb(~isfixed)); plot(a,b,'.-','markersize',20); 
+                        h=text(a,b+0.05,strread(sprintf('%0.3g\n',x(~isfixed)),'%s'),'HorizontalAlignment','left'); set(h,'rotation',90);
+                        ylim([0 1]); set(gca,'YTick',[0 1],'YTickLabel',{'LB','UB'}); set(gca,'XTickLabel',label(~isfixed)); 
                 end
+            end
+            function state = plot_func_sa_(~,state,flag,~)
+                switch flag
+                    % Plot initialization
+                    case 'init'
+                        clf; figure(1); set(gcf,'color','w');
+                    case 'iter'
+                        % reconstruct full vector
+                        f = find( isfixed); xf = x0(f);
+                        l = find(~isfixed); xl = state.bestx;
+                        x([f,l]) = [xf,xl];
+                        % plot it
+                        semilogy(th,simulate_(rscale_(x)),th,intensity); 
+                        % title
+                        title(sprintf('(iteration = %i)',state.iteration)); 
+                        axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
+                        ylim([min(intensity),max(intensity)]);
+                    case 'done'
+                        % initialize
+                        figure(1); clf; set(gcf,'color','w');
+                        % plot
+                        semilogy(th,intensity,'.',th,simulate_(rscale_(x)),'--');
+                        axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
+                        % title
+                        title(sprintf('thickness = %.2f nm; film density %.2f g/cm3; substrate density %.2f g/cm3; \n film roughness = %.2f nm, substrate roughness = %.2f nm',...
+                            x(1),x(3)*layer(1).mass_density,x(4)*layer(2).mass_density,x(5),x(6)));
+                        % define labels manually
+                        switch nlayers
+                            case 2; label = {'T1','T2','D1','D2','R1','R2','W','I','B'};
+                            case 3; label = {'T1','T2','T3','D1','D2','D3','R1','R2','R3','W','I','B'};
+                        end
+                        % bounds
+                        axes('position',[0.4 0.6 0.45 0.25]);
+                        a = 1:sum(~isfixed); b = (x(~isfixed)-lb(~isfixed))./(ub(~isfixed)-lb(~isfixed)); plot(a,b,'.-','markersize',20); 
+                        h=text(a,b+0.05,strread(sprintf('%0.3g\n',x(~isfixed)),'%s'),'HorizontalAlignment','left'); set(h,'rotation',90);
+                        ylim([0 1]); set(gca,'YTick',[0 1],'YTickLabel',{'LB','UB'}); set(gca,'XTickLabel',label(~isfixed)); 
+                end
+                state = false;
             end
         end
         
@@ -356,7 +432,7 @@ classdef am_mbe
             % domain     [deg]          (optional) [min max]
             %
 
-            import am_mbe.*
+            import am_mbe.* am_lib.*
             
             % resample intensity and q on equidistant intervals
             q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; 
@@ -369,7 +445,7 @@ classdef am_mbe
             else 
                 ex_ = true;
             end
-            if nargin > 4
+            if nargin < 4
                 profile='f';
             end
             if      contains(profile,'fs')
@@ -400,6 +476,18 @@ classdef am_mbe
                 isfixed = [0 0 0 0];
                 lb = [1E-6 min(q)  5/2/pi 1E-6]; lb = fscale_(lb); 
                 ub = [1E6  max(q) 50/2/pi 1E-4]; ub = fscale_(ub);
+                x0 = mean([lb;ub]);
+            elseif contains(profile,'pv')
+                % define rescaling
+                fscale_= @(x) [log10(x(1)),x(2:4),log10(x(5))];
+                rscale_= @(x) [ 10.^(x(1)),x(2:4), 10.^(x(5))];
+                % define pseudo-voigt
+                func_ = @(x) x(1).*pvoigt_((q-x(2))./x(3),x(4)).*x(3) + x(5);
+                cost_ = @(x) sum(abs(log10(func_(rscale_(x))) - log10(intensity(:)) ));
+                % lower and upper bounds; starting condition
+                isfixed = [0 0 0 0 0];
+                lb = [    min(intensity) min(q) 0.1 0 min(intensity)]; lb = fscale_(lb); 
+                ub = [110*max(intensity) max(q) 1.0 1 max(intensity)]; ub = fscale_(ub);
                 x0 = mean([lb;ub]);
             end
             % optimization options
@@ -455,7 +543,7 @@ classdef am_mbe
             end
         end
         
-        function [intensity] = simulate_xrr(layer,th,hv,thickness,filling,roughness,method)
+        function [intensity] = simulate_xrr(layer,th,hv,thickness,filling,roughness,sample_length,method)
             %
             % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
             % 
@@ -471,13 +559,11 @@ classdef am_mbe
             
             import am_mbe.*
             
-            if nargin < 7
-                method = 2;
-            end
+            if nargin < 8; method = 2; end
+            if nargin < 7; sample_length = []; end
 
             switch method
-                case 1 % explicit transfer matrix (slower)
-                    
+                case 1 % explicit transfer matrix (slower)                    
                     % get kx and kz
                     % Note: k are incident wavevectors and not diffraction vectors
                     lambda = get_photon_wavelength(hv);
@@ -508,7 +594,6 @@ classdef am_mbe
                     % T = subs(T,z,0)
                     % simplify
                     % T = simplify(expand(T));
-                    %
                     get_transfer_matrix_at_interface = @(k1,k2,sigma) [ ...
                         [ (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1), (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1)]
                         [ (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1), (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1)] ];
@@ -532,6 +617,9 @@ classdef am_mbe
                         end
                         intensity(j) = abs(M(2,1)./M(1,1)).^2;
                     end
+                    
+                    th=th(:).';
+                    intensity=intensity(:).';
                     
                 case 2 % recursive Parratt method without transfer matrix (faster)
                     % number of layers
@@ -567,14 +655,18 @@ classdef am_mbe
                     else
                         intensity = abs(R(nlayers-1,:)).^2;
                     end
+                    
+                    th=th(:).';
+                    intensity=intensity(:).';
+                    
             end
             
             % add intensity correction due to finite sample width
-            h = 0.1; % [mm] height of x-ray beam
-            L = 10;  % [mm] length of sample
-            th_b = asind(h/L);
-            intensity(th<th_b) = sind(th(th<th_b)) ./ sind(th_b) .* intensity(th<th_b);
-            
+            if ~isempty(sample_length)
+                xray_beam_height = 0.1; % [mm] height of x-ray beam
+                th_b = asind(xray_beam_height/sample_length);
+                intensity(th<th_b) = sind(th(th<th_b)) ./ sind(th_b) .* intensity(th<th_b);
+            end
         end
 
         function [h]     = plot_bragg_reflections(uc)
@@ -1126,30 +1218,6 @@ classdef am_mbe
         
         
         
-    end
-    
-    
-    % library
-
-    methods (Static)
-
-        function [x,r] = ga_(cost_,x0,isfixed,varargin)
-
-            % fixed and loose indicies
-            f = find( isfixed); xf = x0(f);
-            l = find(~isfixed); xl = x0(l);
-
-            % Estimate only the non-fixed ones
-            [xl,r] = ga(@localcost_,sum(isfixed==0),varargin{:});
-
-            % Re-create array combining fixed and estimated coefficients
-            x([f,l]) = [xf,xl];
-
-            function y = localcost_(x)
-               b([f,l]) = [xf,x]; y = cost_(b);
-            end
-        end
-
     end
     
 end
