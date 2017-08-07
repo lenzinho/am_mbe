@@ -198,9 +198,9 @@ classdef am_mbe
             % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv)
             %
 
-            import am_mbe.*
+            import am_mbe.* am_lib.*
 
-            if nargin < 4
+            if nargin < 4 || isempty(thc)
                 qc = [];
             else
                 qc = get_qz(thc,hv);
@@ -216,7 +216,7 @@ classdef am_mbe
             % resample Fq,q on equidistant intervals
             qe = linspace(min(q),max(q),nqs).'; Fq = interp1(q,Fq,qe); q = qe; 
             % apply background correction
-            Fq= (Fq.*q.^4-mean(Fq.*q.^4)).*tukeywin(nqs,0.90);
+            Fq= (Fq.*q.^4-mean(Fq.*q.^4)) .* tukey_(nqs,0.90);
             % evalute DFT
             x  = [0:0.5:200]; 
             K  = exp(-1i*x(:).*q(:).');
@@ -403,12 +403,10 @@ classdef am_mbe
             % resample intensity and q on equidistant intervals
             q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
             % if window is defined, crop and filter
-            if 4 > 3
-                ex_ = and( th2 < max(domain) , th2 > min(domain) ); nqs = sum(ex_);
-                th2 = th2(ex_); q = q(ex_); Fq = Fq(ex_);% .* tukeywin(nqs,0.90);
-            else 
-                ex_ = true;
-            end
+            if nargin > 3; if ~isempty(domain)
+                ex_ = and( th2 < max(domain) , th2 > min(domain) );
+                th2 = th2(ex_); q = q(ex_); Fq = Fq(ex_); Fq = Fq .* tukey_(numel(Fq),0.90); 
+            end; end
             % evalute DFT
             x  = [0:0.5:200]; 
             K  = exp(-1i*x(:).*q(:).');
@@ -454,7 +452,7 @@ classdef am_mbe
                 rscale_= @(x) [exp(x(1)),x(2:3),exp(x(4)),x(5:6),exp(x(7))];
                 % define gaussian, sinc, peak, and objective functions
                 gaus_ = @(x) x(1).*exp(-((q-x(2))./x(3)).^2);
-                sinc_ = @(x) x(1).*sinc( (q-x(2)).*x(3)).^2 ;
+                sinc_ = @(x) x(1).*sinc_( (q-x(2)).*x(3)).^2 ;
                 func_ = @(x) sinc_(x(1:3))+gaus_(x(4:6)) + x(7);
                 cost_ = @(x) sum(abs(log(func_(rscale_(x))) - log(intensity(:)) ));
                 % guess substrate position
