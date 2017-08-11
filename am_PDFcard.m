@@ -73,9 +73,9 @@ function listbox1_Callback(hObject, eventdata, handles)
     file_list = get(handles.listbox1,'String');
     filename = file_list{index_selected};
     if     strcmp(get(handles.figure1,'SelectionType'),'normal')
-        if contains(ext,'poscar')
+        if contains(filename,'poscar')
             uc = load_poscar(filename);
-            plot_millers(handles.axes1,uc);
+            plot_millers(handles.axes1,uc); 
     %         handles.axes1.YScale='log';
     %         handles.axes1.YLabel.String='Intensity';
         end
@@ -83,32 +83,47 @@ function listbox1_Callback(hObject, eventdata, handles)
         if  handles.is_dir(index_selected)
             cd(filename);
             load_listbox(pwd,handles);
+        elseif contains(filename,'poscar')
+            fprintf('%s\n',repmat('-',100));
+            fprintf('%s\n',filename);
+            type(filename)
         end
     end
 end
 
 function [h]     = plot_millers(h,uc)
     %
-    import am_lib.permn_ am_lib.normc_ am_lib.rnd_
-    import am_mbe.*
+    import am_lib.* am_mbe.*
+    
     % generate hkl list
-    hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
-    hkl = permn_([0:4],3).'; hkl=hkl(:,2:end); k = hkl; k_mag = normc_(inv(uc.bas).'*k);
-    [~,i] = unique(rnd_(k_mag)); k=k(:,i); k_mag=k_mag(:,i); hkl=hkl(:,i);
-    th2 = 2*asind( get_photon_energy(hv) * k_mag / 2 * 10 ); ex_ = abs(imag(th2(:)))<1E-8; 
-    k=k(:,ex_); hkl=hkl(:,ex_); th2=th2(ex_);
-    % get atomic scattering factors and structure factor
-    [Z,~,j] = unique(get_atomic_number({uc.symb{uc.species}}));
+    hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1'); lambda = get_photon_energy(hv);
+    % get miller indicies [hkl]
+    N=6; hkl=permn_([0:N],3).'; k=inv(uc.bas*0.1).'*hkl; 
+    % % exclude values which cannot be reached by diffractometer
+    th2_max=110; ex_=lambda*normc_(k)/2<sind(th2_max/2); hkl=hkl(:,ex_); k=k(:,ex_);
+    % % find unique hkls (proper way to do it would be to use symmetry relations, but whatever)
+    [~,i] = unique(rnd_(normc_(k))); k=k(:,i(2:end)); hkl=hkl(:,i(2:end));
+    % compute angles
+    th2 = 2*asind( lambda * normc_(k) / 2 );
+
+    % get structure factor
+    [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
     f0 = permute(get_atomic_xray_form_factor(Z,hv,th2),[1,3,2]);
-    Fhkl = sum(f0(j,:).*exp(2i*pi*uc.tau.'*k),1); 
-    Fhkl2= abs(Fhkl).^2; ex_ = abs(Fhkl)>1E-5;% Fhkl2 = Fhkl2./max(Fhkl2(:));
+    Fhkl = sum(f0(i,:).*exp(2i*pi*uc.tau.'*hkl),1); Fhkl2= abs(Fhkl).^2; 
+    Fhkl2=Fhkl2./max(Fhkl2);
+
     % plot Bragg peaks
-    % h = hggroup;
-    plot(h,th2(ex_),Fhkl2(ex_),'.','markersize',10);
+    ex_=Fhkl2>0.01; label_threshold = 0; plot(h,0,0);
     for i = 1:numel(th2); if ex_(i)
         line(h,[th2(i),th2(i)],[0,Fhkl2(i)]);
-        text(h,th2(i),Fhkl2(i),sprintf('  %i%i%i',hkl(:,i)),'Rotation',90);
+        if Fhkl2(i) > label_threshold
+            text(h,th2(i),Fhkl2(i),sprintf('  [%i%i%i] %.3f^\\circ',hkl(:,i),th2(i)),'rotation',90);
+        end
     end; end
+    set(h,'XLim',[0 115],'YLim',[0 2],'XTick',[0:10:130],'XMinorTick','on','YTick',[]);
+    h.XLabel.String='2\theta [deg]'; h.YLabel.String='Intensity [a.u.]'; 
+%     box on; set(gca,'YTick',[]); grid on; set(gca,'XMinorGrid','on');
+
 end
 
 % ------------------------------------------------------------
