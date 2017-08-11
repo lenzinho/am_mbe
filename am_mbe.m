@@ -89,6 +89,82 @@ classdef am_mbe
         
     end
     
+    % mbe related things
+    
+    methods (Static)
+        
+        function [Instances] = read_mbe_log(flog)
+            % 
+            Instances.date = strrep(strrep(strtrim(flog),'.log',''),'.','/');
+            % timestep [s]
+            fid = fopen(flog);
+                % buffer header
+                b = strtrim(fgetl(fid));
+                % split header based on tabs
+                h = strsplit(b,'\t');
+                % trim headers
+                h = strtrim(h);
+                % load data
+                d = fscanf(fid,'%f');
+                %
+            fclose(fid);
+            % create array
+            nhs = numel(h);
+            d = reshape(d,nhs,[]).';
+            % create structure
+            Instances.time=seconds(d(:,1));
+            for i = 2:nhs
+                eval(sprintf('%s=d(:,%i);',h{i},i)); 
+            end
+        end
+    end
+    
+    % RHEED related things
+    
+    methods (Static)
+        
+        function           demo_rheed_oscillations
+            clear;clc; import am_lib.* am_mbe.*
+
+            fname = 'ABM170803.txt'; domain = [00,1000];
+            switch 'txt'
+                case 'txt'
+                    % MUST SPECIFY number of ROIs manually
+                    nrois = 3;
+                    fid = fopen(fname); d=fscanf(fid,'%f'); fclose(fid);
+                    d = reshape(d,2,[],nrois);
+                    for i = 1:nrois; [t(:,i),y(:,i)] = deal(d(1,:,i).',d(2,:,i).'); end
+                case 'xlsx'
+                    d = xlsread(fname); nrois = (size(d,2)-1);
+                    t = repmat(d(:,1),1,nrois);
+                    y = d(:,2:end);
+            end
+            % exclude domain
+            ex_ = and(t(:,1)>min(domain),t(:,1)<max(domain)); t=t(ex_,:); y=y(ex_,:);
+            % analyze
+            analyze_rheed_oscillations_with_fft(t,y);
+            % plot
+            plot(t,sin(2*pi*(t-43)/19.04)); axis tight
+        end
+        
+        function           analyze_rheed_oscillations_with_fft(t,y)
+            import am_lib.*
+            % count number of scans
+            nys=size(y,2);
+            % smooth
+            g_ = gaussw_(30,2); g_=g_./sum(g_);
+            for i = 1:nys; y(:,i) = conv(y(:,i),g_,'same'); end
+            % subtract mean
+            y=y-mean(y,1);
+            % apply tukey filter
+            nts = size(t,1); g_ = tukeyw_(nts,0.96);
+            y = y .* g_;
+            % plot power spectrum
+            plot_power_spectrum_(t,y)
+        end
+        
+    end
+    
     % x-ray related things
     
     methods (Static)
@@ -183,6 +259,39 @@ classdef am_mbe
             x = analyze_xrr_with_fit(th,intensity,hv,layer,x0,ub,lb,isfixed);
         end
         
+        function           demo_pole_figure()
+            clear; clc; import am_mbe.* am_lib.*
+            % define photon energy and angles
+            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
+
+            % load 
+            % d = xrdmlread('ABM170804-09_YSZ(004)_PF.xrdml');
+            % d = xrdmlread('ABM170804-09_BFO(004)_PF.xrdml');
+            d = xrdmlread('ABM170804-15_YSZ(004)_PF.xrdml');
+            % d = xrdmlread('ABM170804-17_LFO(112)_PF.xrdml');
+
+            % reorient phi 
+            phi_align=-4.5; chi=d.Chi-min(d.Chi); phi=d.Phi-min(d.Phi)+phi_align; data=d.data;
+            % define and apply convolution window
+            w2_ = @(N,alpha,w1_) w1_(N,alpha).*w1_(N,alpha).'; data = conv2(data,w2_(10,20,@gaussw_),'same');
+            % plot pole figure
+            plot_pole_figure(phi,chi,(data)); daspect([1 1 1])
+
+            % annotate?
+            if false
+                [x2,y2] = ginput(1);
+                annotate_pole_figure_reference(x2,y2,'chi','color','w','linewidth',1);
+            end
+
+            % angle between two points?
+            if false
+                [x2,y2] = ginput(1);
+                annotate_pole_figure_reference(x2,y2,'chi','color','w','linewidth',1);
+            end
+            annotate_pole_figure_angle
+
+        end
+        
         function           analyze_xrr_with_fft(th,intensity,hv,thc)
             %
             % beta = analyze_xrr_with_fft(th,xrr,hv,thc)
@@ -216,7 +325,7 @@ classdef am_mbe
             % resample Fq,q on equidistant intervals
             qe = linspace(min(q),max(q),nqs).'; Fq = interp1(q,Fq,qe); q = qe; 
             % apply background correction
-            Fq= (Fq.*q.^4-mean(Fq.*q.^4)) .* tukey_(nqs,0.90);
+            Fq = (Fq.*q.^4-mean(Fq.*q.^4)) .* tukey_(nqs,0.90);
             % evalute DFT
             x  = [0:0.5:200]; 
             K  = exp(-1i*x(:).*q(:).');
@@ -303,6 +412,23 @@ classdef am_mbe
                     [x,~] = sa_(cost_,x0,isfixed,lb(~isfixed),ub(~isfixed),opts_);  x = rscale_(x);
             end
             
+            % plot final result
+                semilogy(th,intensity,'.',th,simulate_(x),'--'); axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
+                if nlayers==2 % title
+                    title(sprintf('thickness = %.2f nm; film density %.2f g/cm3; substrate density %.2f g/cm3; \n film roughness = %.2f nm, substrate roughness = %.2f nm',...
+                        x(1),x(3)*layer(1).mass_density,x(4)*layer(2).mass_density,x(5),x(6)));
+                end
+            % plot bounds 
+                switch nlayers % define labels
+                    case 2; label = {'T1','T2','D1','D2','R1','R2','W','I','B'};
+                    case 3; label = {'T1','T2','T3','D1','D2','D3','R1','R2','R3','W','I','B'};
+                end
+                % bounds
+                axes('position',[0.4 0.6 0.45 0.25]);
+                a = 1:sum(~isfixed); b = (x(~isfixed)-lb(~isfixed))./(ub(~isfixed)-lb(~isfixed)); plot(a,b,'.-','markersize',20); 
+                h=text(a,b+0.05,strread(sprintf('%0.3g\n',x(~isfixed)),'%s'),'HorizontalAlignment','left'); set(h,'rotation',90);
+                ylim([0 1]); set(gca,'YTick',[0 1],'YTickLabel',{'LB','UB'}); set(gca,'XTickLabel',label(~isfixed)); 
+            
             function state = plot_func_ga_(~,state,flag,~)
                 switch flag
                     % Plot initialization
@@ -322,25 +448,6 @@ classdef am_mbe
                         % state.Population(i,3), 2*asind(1239.842/hv/(4*pi)*state.Population(i,2))
                         axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
                         ylim([min(intensity),max(intensity)]);
-                    case 'done'
-                        % initialize
-                        figure(1); clf; set(gcf,'color','w');
-                        % plot
-                        semilogy(th,intensity,'.',th,simulate_(rscale_(x)),'--');
-                        axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
-                        % title
-                        title(sprintf('thickness = %.2f nm; film density %.2f g/cm3; substrate density %.2f g/cm3; \n film roughness = %.2f nm, substrate roughness = %.2f nm',...
-                            x(1),x(3)*layer(1).mass_density,x(4)*layer(2).mass_density,x(5),x(6)));
-                        % define labels manually
-                        switch nlayers
-                            case 2; label = {'T1','T2','D1','D2','R1','R2','W','I','B'};
-                            case 3; label = {'T1','T2','T3','D1','D2','D3','R1','R2','R3','W','I','B'};
-                        end
-                        % bounds
-                        axes('position',[0.4 0.6 0.45 0.25]);
-                        a = 1:sum(~isfixed); b = (x(~isfixed)-lb(~isfixed))./(ub(~isfixed)-lb(~isfixed)); plot(a,b,'.-','markersize',20); 
-                        h=text(a,b+0.05,strread(sprintf('%0.3g\n',x(~isfixed)),'%s'),'HorizontalAlignment','left'); set(h,'rotation',90);
-                        ylim([0 1]); set(gca,'YTick',[0 1],'YTickLabel',{'LB','UB'}); set(gca,'XTickLabel',label(~isfixed)); 
                 end
             end
             function state = plot_func_sa_(~,state,flag,~)
@@ -359,25 +466,6 @@ classdef am_mbe
                         title(sprintf('(iteration = %i)',state.iteration)); 
                         axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
                         ylim([min(intensity),max(intensity)]);
-                    case 'done'
-                        % initialize
-                        figure(1); clf; set(gcf,'color','w');
-                        % plot
-                        semilogy(th,intensity,'.',th,simulate_(rscale_(x)),'--');
-                        axis tight; xlabel('\theta [deg]'); ylabel('Intensity [a.u.]');
-                        % title
-                        title(sprintf('thickness = %.2f nm; film density %.2f g/cm3; substrate density %.2f g/cm3; \n film roughness = %.2f nm, substrate roughness = %.2f nm',...
-                            x(1),x(3)*layer(1).mass_density,x(4)*layer(2).mass_density,x(5),x(6)));
-                        % define labels manually
-                        switch nlayers
-                            case 2; label = {'T1','T2','D1','D2','R1','R2','W','I','B'};
-                            case 3; label = {'T1','T2','T3','D1','D2','D3','R1','R2','R3','W','I','B'};
-                        end
-                        % bounds
-                        axes('position',[0.4 0.6 0.45 0.25]);
-                        a = 1:sum(~isfixed); b = (x(~isfixed)-lb(~isfixed))./(ub(~isfixed)-lb(~isfixed)); plot(a,b,'.-','markersize',20); 
-                        h=text(a,b+0.05,strread(sprintf('%0.3g\n',x(~isfixed)),'%s'),'HorizontalAlignment','left'); set(h,'rotation',90);
-                        ylim([0 1]); set(gca,'YTick',[0 1],'YTickLabel',{'LB','UB'}); set(gca,'XTickLabel',label(~isfixed)); 
                 end
                 state = false;
             end
@@ -420,7 +508,7 @@ classdef am_mbe
             subplot(2,1,2); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200]);
         end
         
-        function [d,th2] = analyze_xrd_with_fit(th2,intensity,hv,domain,profile)
+        function [d,th2c]= analyze_xrd_with_fit(th2,intensity,hv,domain,profile)
             %
             % beta = analyze_xrd_with_fit(th,xrr,hv)
             % 
@@ -431,114 +519,34 @@ classdef am_mbe
             %
 
             import am_mbe.* am_lib.*
+           
+            % if window is defined, crop
+            if nargin > 3 || ~isempty(domain)
+                ex_ = and( th2 < max(domain) , th2 > min(domain) ); th2 = th2(ex_); intensity = intensity(ex_);
+            end
+            if nargin < 5
+                profile='pvoigt'; 
+            end
             
             % resample intensity and q on equidistant intervals
             q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; 
-            intensity = interp1(q,intensity,qe); intensity(intensity==0)=min(intensity(intensity~=0)); %intensity = intensity./max(intensity);
-            q = qe; th2 = get_th(q,hv)*2;
-            % if window is defined, crop and filter
-            if nargin > 3
-                ex_ = and( th2 < max(domain) , th2 > min(domain) );
-                th2 = th2(ex_); q = q(ex_); intensity = intensity(ex_);
-            else 
-                ex_ = true;
-            end
-            if nargin < 4
-                profile='f';
-            end
-            if      contains(profile,'fs')
-                % define rescaling
-                fscale_= @(x) [log(x(1)),x(2:3),log(x(4)),x(5:6),log(x(7))];
-                rscale_= @(x) [exp(x(1)),x(2:3),exp(x(4)),x(5:6),exp(x(7))];
-                % define gaussian, sinc, peak, and objective functions
-                gaus_ = @(x) x(1).*exp(-((q-x(2))./x(3)).^2);
-                sinc_ = @(x) x(1).*sinc_( (q-x(2)).*x(3)).^2 ;
-                func_ = @(x) sinc_(x(1:3))+gaus_(x(4:6)) + x(7);
-                cost_ = @(x) sum(abs(log(func_(rscale_(x))) - log(intensity(:)) ));
-                % guess substrate position
-                [~,i]=max(intensity); q_sub = q(i);
-                % lower and upper bounds; starting condition
-                isfixed = [0 0 0 0 0 0 0];
-                lb = [1E-6 min(q)  0 1E-1 q_sub-0.1 0.1 1E-6]; lb = fscale_(lb); 
-                ub = [1E+6 max(q) 10 1E+9 q_sub+0.1 1.0 1E-4]; ub = fscale_(ub);
-                x0 = mean([lb;ub]);
-            elseif contains(profile,'f')
-                % define rescaling
-                fscale_= @(x) [log10(x(1)),x(2:3),log10(x(4))];
-                rscale_= @(x) [ 10.^(x(1)),x(2:3), 10.^(x(4))];
-                % define gaussian, sinc, peak, and objective functions
-                sinc_ = @(x) x(1).*sinc( (q-x(2)).*x(3)).^2;
-                func_ = @(x) sinc_(x(1:3)) + x(4);
-                cost_ = @(x) sum(abs(log(func_(rscale_(x))) - log(intensity(:)) ));
-                % lower and upper bounds; starting condition
-                isfixed = [0 0 0 0];
-                lb = [1E-6 min(q)  5/2/pi 1E-6]; lb = fscale_(lb); 
-                ub = [1E6  max(q) 50/2/pi 1E-4]; ub = fscale_(ub);
-                x0 = mean([lb;ub]);
-            elseif contains(profile,'pv')
-                % define rescaling
-                fscale_= @(x) [log10(x(1)),x(2:4),log10(x(5))];
-                rscale_= @(x) [ 10.^(x(1)),x(2:4), 10.^(x(5))];
-                % define pseudo-voigt
-                func_ = @(x) x(1).*pvoigt_((q-x(2))./x(3),x(4)).*x(3) + x(5);
-                cost_ = @(x) sum(abs(log10(func_(rscale_(x))) - log10(intensity(:)) ));
-                % lower and upper bounds; starting condition
-                isfixed = [0 0 0 0 0];
-                lb = [    min(intensity) min(q) 0.1 0 min(intensity)]; lb = fscale_(lb); 
-                ub = [110*max(intensity) max(q) 1.0 1 max(intensity)]; ub = fscale_(ub);
-                x0 = mean([lb;ub]);
-            end
-            % optimization options
-            opts_hybrid_ = optimoptions(...
-                @fmincon,'Display','off',...
-                         'MaxFunctionEvaluations',1E3,...
-                         'MaxIterations',1E3,...
-                         'StepTolerance',1E-18,...
-                         'FunctionTolerance',1E-18,...
-                         'Algorithm','active-set');
-            opts_ = optimoptions(@ga,'PopulationSize',100, ...
-                                     'InitialPopulationMatrix',x0(~isfixed), ...
-                                     'MutationFcn',{@mutationadaptfeasible}, ...
-                                     'EliteCount',1, ...
-                                     'FunctionTolerance',1E-5, ...
-                                     'Display','off',...
-                                     'PlotFcns',{@plot_func_},...
-                                     'HybridFcn',{@fmincon,opts_hybrid_});
-            % perform optimization
-            [x,~] = ga_(cost_,x0,isfixed,[],[],[],[],lb(~isfixed),ub(~isfixed),[],opts_); x = rscale_(x);
+            intensity = interp1(q,intensity,qe); intensity(intensity==0)=min(intensity(intensity~=0));
+            q = qe; th2 = 2*get_th(q,hv);
             
-            figure(1); clf; set(gcf,'color','w');
-            semilogy(th2,intensity,'.',th2,func_(x),'--');
-            axis tight; xlabel('2\theta [deg]'); ylabel('Intensity [a.u.]');
+            % perform fit
+            [c,f] = fit_peak_(q,intensity,profile);
             
-            % output
-            d = 2*pi*x(3); % thickness [nm]
-            th2 = 2*get_th(x(2),hv); % 2theta peak position [deg]
-            
-            function state = plot_func_(~,state,flag,~)
-                
-                switch flag
-                    % Plot initialization
-                    case 'init'
-                        clf; figure(1); set(gcf,'color','w');
-                    case 'iter'
-                        % find best population
-                        [~,j]=min(state.Score);
-                        % reconstruct full vector
-                        f = find( isfixed); xf = x0(f);
-                        l = find(~isfixed); xl = state.Population(j,:);
-                        x([f,l]) = [xf,xl];
-                        % plot it
-                        semilogy(th2,func_(rscale_(x)),th2,intensity); 
-                        % title
-                        title(sprintf('(generation = %i)',state.Generation)); 
-                        % state.Population(i,3), 2*asind(1239.842/hv/(4*pi)*state.Population(i,2))
-                        title(sprintf('thickness = %2.2f nm   2th = %2.3f deg   (generation = %i)',...
-                            2*pi*state.Population(j,3), 2*asind(1239.842/hv/(4*pi)*state.Population(j,2)),state.Generation )); 
-                        axis tight; xlabel('2\theta [deg]'); ylabel('intensity [a.u.]');
-                        %ylim([min(intensity),max(intensity)]);
-                end
+            % thickness (or width) and maximum
+            switch profile
+                case {'sinc+pvoigt','sinc','pvoigt'}
+                    d = 2*pi./c(3); th2c = 2*get_th(c(2),hv);
+                otherwise
+                    asdfsd 
+                    % function parameters are not defined
             end
+            
+            semilogy(th2,f,th2,intensity); axis tight; xlabel('2\theta [deg]'); ylabel('Intensity [a.u.]');
+            title(sprintf('thickness (or width) = %.2f nm; 2\\theta_c = %.3f deg',d,th2c));
         end
         
         function [intensity] = simulate_xrr(layer,th,hv,thickness,filling,roughness,sample_length,method)
@@ -667,28 +675,170 @@ classdef am_mbe
             end
         end
 
-        function [h]     = plot_bragg_reflections(uc)
+        function [h]     = plot_pole_figure(phi,chi,data,flag)
+            
+            import am_lib.*
+            
+            if nargin < 4; flag = 'phi,chi'; end
+            
+            % apply PBC: copy first three columns at the end
+            m = numel(phi); phi(m+[1:3]) = phi([1:3]); data(:,m+[1:3])=data(:,[1:3]); 
+            % make mesh
+            [chi,phi]=ndgrid(chi,phi); [x,y] = pol2cartd_(phi,cotd(90-chi/2));
+            
+            % plot
+            figure(1);clf;set(gcf,'color','w');
+            h = contourf(x,y,data,25,'edgecolor','none'); 
+            view([0 0 1]); axis off; daspect([1 1 1]);
+            
+            if contains(flag,'phi')
+                % draw constant-chi lines
+                clist = [15 30 45 60 75 90]; slist={'-','--'};
+                for i = 1:numel(clist)
+                    [x,y] = pol2cartd_([0:5:360]+17/2,cotd(90-clist(i)/2)); 
+                    line(x,y,'linestyle',slist{mod(i,2)+1},'color','k'); 
+                    text(x(1),y(1),sprintf(' %i',clist(i)));
+                end
+            end
+            
+            if contains(flag,'chi')
+                % draw constant-phi lines
+                clist = [0 90 180 270]+[15 30 45 60 75 90].'; slist={'-.',':'};
+                for i = 1:numel(clist)
+                    [x,y] = pol2cartd_(clist(i),cotd(90-[0,90]/2));
+                    line(x,y,'linestyle',slist{mod(i,2)+1},'color','k'); 
+                    [x,y] = pol2cartd_(clist(i),cotd(90-[90]/2)*1.07);
+                    text(x,y,sprintf('%i',clist(i)),'HorizontalAlignment','center');
+                end
+            end
+        end
+        
+        function [angle] = annotate_pole_figure_angle()
+            import am_lib.*
+            % get points
+            [x2,y2]=ginput(2);
+            % convert coordinates
+            [phi,r]=cart2pold_(x2,y2); chi = 2*(90-acotd(r)); [x3,y3,z3]=sph2cartd_(phi,chi,1);
+            % compute angle
+            v1 = [x3(1),y3(1),z3(1)]; v2 = [x3(2),y3(2),z3(2)]; angle = acosd( dot(v1,v2)./norm(v1)./norm(v2) );
+            % get the trajectory and label the angle
+            trajectory = linspacen_(v1.',v2.',100); trajectory = trajectory./normc_(trajectory);
+            % convert coordinates
+            [phi,chi,~]= cart2sphd_(trajectory(1,:),trajectory(2,:),trajectory(3,:)); [x2,y2] = pol2cartd_(phi,cotd(90-chi/2));
+            % plot results
+            line(x2,y2,'color','w','linewidth',2); text(x2(end/2),y2(end/2),sprintf('%.2f',angle),'color','w','fontweight','bold')
+        end
+        
+        function           annotate_pole_figure_reference(x2,y2,flag,varargin)
+            import am_lib.*
+            
+            if nargin < 3; flag = 'phi,chi'; end
+            
+            % get reference vector in cartesian coordinates
+            [phi,r]=cart2pold_(x2,y2); chi = 2*(90-acotd(r)); [x3,y3,z3]=sph2cartd_(phi,chi,1); v1 = [x3(1),y3(1),z3(1)]; 
+            % find transformation matrix which aligns v1 with z
+            R = rot_align_(v1,[0,0,1]); 
+            
+            if contains(flag,'phi')
+                % build constant-phi grid
+                phi_list = [0 90 180 270]+[15 30 45 60 75 90].'; phi_list=phi_list(:);
+                chi_list = linspace(0,90,2000);%[15 30 45 60 75 90]; 
+                m = numel(phi_list); n = numel(chi_list);
+                [x3,y3,z3] = sph2cartd_(phi_list,chi_list,ones(m,n));
+                % draw constant-chi lines
+                v2 = inv(R)*[x3(:),y3(:),z3(:)].';
+                % get phi and chi in transformed basis
+                [phi,chi,~]=cart2sphd_(v2(1,:),v2(2,:),v2(3,:)); phi = reshape(phi,[m,n]); chi = reshape(chi,[m,n]);
+                % draw grid
+                slist={'-.','-.'};
+                for i = 1:m
+                    [x,y] = pol2cartd_(phi(i,:),cotd(90-chi(i,:)/2)); 
+                    line(x,y,'linestyle',slist{mod(i,2)+1},varargin{:}); 
+                    text(x(end/2),y(end/2),sprintf(' %i',phi_list(i)),'color','w');
+                end
+            end
+            
+            if contains(flag,'chi')
+                % build constant-chi grid
+                phi_list = linspace(0,360,1000).'; phi_list=phi_list(:);
+                chi_list = [0:10:80]; 
+                m = numel(phi_list); n = numel(chi_list);
+                [x3,y3,z3] = sph2cartd_(phi_list,chi_list,ones(m,n));
+                % draw constant-chi lines
+                v2 = inv(R)*[x3(:),y3(:),z3(:)].';
+                % get phi and chi in transformed basis
+                [phi,chi,~]=cart2sphd_(v2(1,:),v2(2,:),v2(3,:)); phi = reshape(phi,[m,n]); chi = reshape(chi,[m,n]);
+                % draw grid
+                slist={'-','-'}; j = round(n);
+                for i = 1:n
+                    [x,y] = pol2cartd_(phi(:,i),cotd(90-chi(:,i)/2)); 
+                    line(x,y,'linestyle',slist{mod(i,2)+1},varargin{:}); 
+                    text(x(j),y(j),sprintf(' %i',90-chi_list(i)),'color','w');
+                end
+            end
+        end
+        
+        function [h]     = plot_bragg_reflections(uc,varargin)
             import am_mbe.*
             import am_lib.*
+            
             % generate hkl list
-            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
-            hkl = permn_([0:4],3).'; hkl=hkl(:,2:end); k = hkl; k_mag = normc_(inv(uc.bas).'*k);
-            [~,i] = unique(rnd_(k_mag)); k=k(:,i); k_mag=k_mag(:,i); hkl=hkl(:,i);
-            th2 = 2*asind( get_photon_energy(hv) * k_mag / 2 * 10 ); ex_ = abs(imag(th2(:)))<1E-8; 
-            k=k(:,ex_); hkl=hkl(:,ex_); th2=th2(ex_);
-            % get atomic scattering factors and structure factor
-            [Z,~,j] = unique(get_atomic_number({uc.symb{uc.species}}));
+            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1'); lambda = get_photon_energy(hv);
+            % get miller indicies [hkl]
+            N=6; hkl=permn_([0:N],3).'; k=inv(uc.bas*0.1).'*hkl; 
+            % % exclude values which cannot be reached by diffractometer
+            th2_max=110; ex_=lambda*normc_(k)/2<sind(th2_max/2); hkl=hkl(:,ex_); k=k(:,ex_);
+            % % find unique hkls (proper way to do it would be to use symmetry relations, but whatever)
+            [~,i] = unique(rnd_(normc_(k))); k=k(:,i(2:end)); hkl=hkl(:,i(2:end));
+            % compute angles
+            th2 = 2*asind( lambda * normc_(k) / 2 );
+
+            % get structure factor
+            [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
             f0 = permute(get_atomic_xray_form_factor(Z,hv,th2),[1,3,2]);
-            Fhkl = sum(f0(j,:).*exp(2i*pi*uc.tau.'*k),1); 
-            Fhkl2= abs(Fhkl).^2; ex_ = abs(Fhkl)>1E-5;% Fhkl2 = Fhkl2./max(Fhkl2(:));
+            Fhkl = sum(f0(i,:).*exp(2i*pi*uc.tau.'*hkl),1); Fhkl2= abs(Fhkl).^2; 
+            Fhkl2=Fhkl2./max(Fhkl2);
+
             % plot Bragg peaks
-            h = hggroup;
-            plot(th2(ex_),Fhkl2(ex_),'.','markersize',10,'Parent',h); hold on;
+            set(gcf,'color','w'); 
+            h=hggroup; ex_=Fhkl2>0.01; label_threshold = 0;
+            % plot(th2(ex_),Fhkl2(ex_),'.','markersize',10,'Parent',h); hold on;
             for i = 1:numel(th2); if ex_(i)
-                line([th2(i),th2(i)],[0,Fhkl2(i)],'Parent',h);
-                text(th2(i),Fhkl2(i),sprintf('  %i%i%i',hkl(:,i)),'Rotation',90,'Parent',h);
+                line([0,Fhkl2(i)],[th2(i),th2(i)],'Parent',h);
+                if Fhkl2(i) > label_threshold
+                    text(Fhkl2(i),th2(i),sprintf('  [%i%i%i] %.3f^\\circ',hkl(:,i),th2(i)),'Parent',h,varargin{:});
+                end
             end; end
-            hold off;
+            box on; ylabel('2\theta [deg]'); xlabel('intensity [a.u.]'); ylim([5 115]); xlim([0 2]);
+            set(gca,'YTick',[0:10:130]); set(gca,'XTick',[]); grid on; set(gca,'YMinorGrid','on');
+        end
+        
+        function           plot_multiple_bragg_reflections(uc,label)
+            % accepts uc or fposcar
+            import am_mbe.* am_dft.* am_lib.*
+            %
+            n = numel(uc); 
+            %
+            if ischar(uc{1})
+                fposcar = uc; clear uc;
+                for i=1:n
+                    uc{i} = load_poscar(fposcar{i});  
+                    % get labels
+                    if nargin < 2 
+                        [~,label{i},~] = fileparts(fposcar{i}); label{i} = strrep(label{i},'_',' ');
+                    end
+                end
+            end
+            %
+            clist=get_colormap('spectral',n).^7;
+            for i = 1:n
+                axes('position',[(0.1+0.87*(i-1)/n) 0.05 0.85/n 0.95]);
+                plot_bragg_reflections(uc{i},'color',clist(i,:)); 
+                xlabel(label{i});
+                if i~=1
+                    set(gca,'YTickLabel',[]); ylabel('');
+                end
+            end
         end
         
         function [thc]   = get_xray_critical_angle(delta)
@@ -746,7 +896,7 @@ classdef am_mbe
             
             import am_mbe.*
             
-            qz = 4*pi/get_photon_wavelength(hv) * sind(th);
+            qz = 4*pi./get_photon_wavelength(hv) .* sind(th);
             
         end
 
@@ -768,6 +918,7 @@ classdef am_mbe
             th2 = 2*asind(lambda*sqrt(sum(hkl.^2))/(2*a));
             
         end
+        
         
     end
     
