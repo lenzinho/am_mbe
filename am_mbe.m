@@ -808,166 +808,7 @@ classdef am_mbe
                 end
             end
         end
-        
-        function [h]     = simulate_w2th(uc,varargin)
-            % accepts uc or fposcar
-            import am_mbe.* am_lib.* am_dft.*
-            
-            n = numel(uc); 
-            if n>1
-                % accepts uc or fposcar
-                if ischar(uc{1})
-                    fposcar = uc; clear uc; label = cell(n,1);
-                    for j=1:n
-                        uc{j} = load_poscar(fposcar{j});  
-                        % get labels
-                        if nargin < 2 
-                            [~,label{j},~] = fileparts(fposcar{j}); label{j} = strrep(label{j},'_',' ');
-                        end
-                    end
-                end
-                % plot
-                clist=get_colormap('spectral',n).^7;
-                for j = 1:n
-                    axes('position',[(0.1+0.87*(j-1)/n) 0.05 0.85/n 0.95]);
-                    h = simulate_w2th(uc{j},'color',clist(j,:)); 
-                    xlabel(label{j});
-                    if j~=1
-                        set(gca,'YTickLabel',[]); ylabel('');
-                    end
-                end
-            else
-                [h] = simulate_w2th_engine(uc)
-            end
-        end
-        
-        function [h]     = simulate_w2th_engine(uc,varargin)
-           import am_mbe.* am_lib.* am_dft.*
-           
-            % generate hkl list
-            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1'); lambda = get_photon_energy(hv);
-            % get miller indicies [hkl] excluding gamma
-            N=6; hkl=permn_([N:-1:-N],3).'; hkl=hkl(:,~all(hkl==0,1)); 
-            % get reciprocal basis vectors [1/nm]
-            recbas = inv(uc.bas*0.1).';
-            % covert to cart [1/nm] and sort by distances
-            k=recbas*hkl; [~,i]=sort(normc_(k)); k=k(:,i); hkl=hkl(:,i);
-            % exclude values which cannot be reached by diffractometer
-            th2_max=110; ex_=lambda*normc_(k)/2<sind(th2_max/2); hkl=hkl(:,ex_); k=k(:,ex_);
-            
-            % find unique hkls
-            switch 'exact'
-                case 'exact'
-                    % get point symmetries
-                    [~,~,~,R] = get_symmetries(uc);                    
-                    % check that inversion is present, if not add it due to time reversal
-                    if ~any(abs(sum(reshape(R,9,[])+reshape(eye(3),9,1),1))<am_lib.eps)
-                        nRs = size(R,3); R(:,:,nRs+[1:nRs]) = -R(:,:,[1:nRs]);
-                    end
-                    % define function to apply symmetries to position vectors
-                    sym_apply_ = @(R,tau) reshape(matmul_(R(1:3,1:3,:),tau),3,[],size(R,3));
-                    % convert point symmetries [frac -> recp-cart]
-                    R = matmul_(matmul_(recbas,permute(R,[2,1,3])),inv(recbas));
-                    % get permutation matrix and construct a sparse binary representation 
-                    PM = member_(sym_apply_(R,k),k,1E-5); A = get_connectivity(PM);
-                    % get irreducible k-points
-                    i2p = round(findrow_(A)).'; %p2i = round(([1:size(A,1)]*A));
-                    % record irreducible kponts and multiplicity
-                    k = k(:,i2p); hkl=hkl(:,i2p); m = sum(A,2);
-                case 'fast'
-                    % find unique hkls by comparing distances
-                    [~,i] = unique(rnd_(normc_(k))); k=k(:,i(2:end)); hkl=hkl(:,i(2:end)); m = ones(1,numel(i));
-            end
-            
-            % compute angles
-            th2 = 2*asind( lambda * normc_(k) / 2 );
-            % get structure factor
-            [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
-            f0 = permute(get_atomic_xray_form_factor(Z,hv,th2),[1,3,2]);
-            Fhkl = sum(f0(i,:).*exp(2i*pi*uc.tau.'*hkl),1); Fhkl2= abs(Fhkl).^2; 
-            Fhkl2 = Fhkl2./max(Fhkl2);
 
-            % exclude everything with peak height smaller than threshold
-            ex_=Fhkl2>0.01; Fhkl2=Fhkl2(ex_); Fhkl=Fhkl(ex_); th2=th2(ex_); 
-            hkl=hkl(:,ex_); k=k(:,ex_); m=m(ex_);
-            
-            % plot Bragg peaks
-            set(gcf,'color','w'); 
-            h=hggroup; label_threshold = 0;
-            for i = 1:numel(th2)
-                line([0,Fhkl2(i)],[th2(i),th2(i)],'Parent',h);
-                if Fhkl2(i) > label_threshold
-                    text(Fhkl2(i),th2(i),sprintf('  [%i%i%i]  %.3f^\\circ  %i',hkl(:,i),th2(i),m(i)),'Parent',h,varargin{:});
-                end
-            end
-            box on; ylabel('2\theta [deg]'); xlabel('intensity [a.u.]'); ylim([5 115]); xlim([0 2]);
-            set(gca,'YTick',[0:10:130]); set(gca,'XTick',[]); grid on; set(gca,'YMinorGrid','on');
-        end
-        
-        function           print_bragg_table(uc,threshold)
-           import am_mbe.* am_lib.* am_dft.*
-           
-           if nargin<2
-               threshold = 0.1;
-           end
-           
-            % generate hkl list
-            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1'); lambda = get_photon_energy(hv);
-            % get miller indicies [hkl] excluding gamma
-            N=6; hkl=permn_([N:-1:-N],3).'; hkl=hkl(:,~all(hkl==0,1)); 
-            % get reciprocal basis vectors [1/nm]
-            recbas = inv(uc.bas*0.1).';
-            % covert to cart [1/nm] and sort by distances
-            k=recbas*hkl; [~,i]=sort(normc_(k)); k=k(:,i); hkl=hkl(:,i);
-            % exclude values which cannot be reached by diffractometer
-            th2_max=110; ex_=lambda*normc_(k)/2<sind(th2_max/2); hkl=hkl(:,ex_); k=k(:,ex_);
-            
-            % find unique hkls
-            switch 'exact'
-                case 'exact'
-                    % get point symmetries
-                    [~,~,~,R] = get_symmetries(uc);                    
-                    % check that inversion is present, if not add it due to time reversal
-                    if ~any(abs(sum(reshape(R,9,[])+reshape(eye(3),9,1),1))<am_lib.eps)
-                        nRs = size(R,3); R(:,:,nRs+[1:nRs]) = -R(:,:,[1:nRs]);
-                    end
-                    % define function to apply symmetries to position vectors
-                    sym_apply_ = @(R,tau) reshape(matmul_(R(1:3,1:3,:),tau),3,[],size(R,3));
-                    % convert point symmetries [frac -> recp-cart]
-                    R = matmul_(matmul_(recbas,permute(R,[2,1,3])),inv(recbas));
-                    % get permutation matrix and construct a sparse binary representation 
-                    PM = member_(sym_apply_(R,k),k,1E-5); A = get_connectivity(PM);
-                    % get irreducible k-points
-                    i2p = round(findrow_(A)).'; %p2i = round(([1:size(A,1)]*A));
-                    % record irreducible kponts and multiplicity
-                    k = k(:,i2p); hkl=hkl(:,i2p); m = sum(A,2);
-                case 'fast'
-                    % find unique hkls by comparing distances
-                    [~,i] = unique(rnd_(normc_(k))); k=k(:,i(2:end)); hkl=hkl(:,i(2:end)); m = ones(1,numel(i));
-            end
-            
-            % compute angles
-            th2 = 2*asind( lambda * normc_(k) / 2 );
-
-            % get structure factor
-            [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
-            f0 = permute(get_atomic_xray_form_factor(Z,hv,th2),[1,3,2]);
-            Fhkl = sum(f0(i,:).*exp(2i*pi*uc.tau.'*hkl),1); Fhkl2= abs(Fhkl).^2; 
-            Fhkl2 = Fhkl2./max(Fhkl2)*100;
-
-            % exclude everything with peak height smaller than threshold
-            ex_=Fhkl2>threshold; Fhkl2=Fhkl2(ex_); Fhkl=Fhkl(ex_); th2=th2(ex_); 
-            hkl=hkl(:,ex_); k=k(:,ex_); m=m(ex_);
-            
-            %  print table
-            nks = size(k,2);
-            fprintf('%5s %5s %5s %10.3s %5s %10.3s\n','h','k','l','2th [deg]','m','Fhkl^2 [a.u.]');
-            fprintf('%5s %5s %5s %10s %5s %10s\n','-----','-----','-----','----------','-----','----------');
-            for i = 1:nks
-                fprintf('%5i %5i %5i %10.3f %5i %10.3f\n',hkl(:,i),th2(:,i),m(i),Fhkl2(i));
-            end
-        end
-        
         function [thc]   = get_xray_critical_angle(delta)
             %
             % thc = photoabsorbtion_crosssection(Z,lambda)
@@ -1046,6 +887,108 @@ classdef am_mbe
             
         end
         
+        
+        
+        function [bragg] = get_bragg(uc)
+           import am_mbe.* am_lib.* am_dft.*
+          
+            % generate hkl list
+            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1'); lambda = get_photon_energy(hv);
+            % get miller indicies [hkl] excluding gamma
+            N=6; hkl=permn_([N:-1:-N],3).'; hkl=hkl(:,~all(hkl==0,1)); 
+            % get reciprocal basis vectors [1/nm]
+            recbas = inv(uc.bas*0.1).';
+            % covert to cart [1/nm] and sort by distances
+            k=recbas*hkl; [~,i]=sort(normc_(k)); k=k(:,i); hkl=hkl(:,i);
+            % exclude values which cannot be reached by diffractometer
+            th2_max=110; ex_=lambda*normc_(k)/2<sind(th2_max/2); hkl=hkl(:,ex_); k=k(:,ex_);
+            
+            % find unique hkls
+            switch 'exact'
+                case 'exact'
+                    % get point symmetries
+                    [~,~,~,R] = get_symmetries(uc);                    
+                    % check that inversion is present, if not add it due to time reversal
+                    if ~any(abs(sum(reshape(R,9,[])+reshape(eye(3),9,1),1))<am_lib.eps)
+                        nRs = size(R,3); R(:,:,nRs+[1:nRs]) = -R(:,:,[1:nRs]);
+                    end
+                    % define function to apply symmetries to position vectors
+                    sym_apply_ = @(R,tau) reshape(matmul_(R(1:3,1:3,:),tau),3,[],size(R,3));
+                    % convert point symmetries [frac -> recp-cart]
+                    R = matmul_(matmul_(recbas,permute(R,[2,1,3])),inv(recbas));
+                    % get permutation matrix and construct a sparse binary representation 
+                    PM = member_(sym_apply_(R,k),k,1E-5); A = get_connectivity(PM);
+                    % get irreducible k-points
+                    i2p = round(findrow_(A)).'; %p2i = round(([1:size(A,1)]*A));
+                    % record irreducible kponts and multiplicity
+                    k = k(:,i2p); hkl=hkl(:,i2p); m = sum(A,2).';
+                case 'fast'
+                    % find unique hkls by comparing distances
+                    [~,i] = unique(rnd_(normc_(k))); k=k(:,i(2:end)); hkl=hkl(:,i(2:end)); m = ones(1,numel(i));
+            end
+            
+            % compute angles
+            th2 = 2*asind( lambda * normc_(k) / 2 );
+
+            % get structure factor
+            [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
+            f0 = permute(get_atomic_xray_form_factor(Z,hv,th2),[1,3,2]);
+            Fhkl = sum(f0(i,:).*exp(2i*pi*uc.tau.'*hkl),1); Fhkl2= abs(Fhkl).^2; 
+            Fhkl2 = Fhkl2./max(Fhkl2)*100;
+            
+            % save structure
+            bragg.th2=th2;
+            bragg.hkl=hkl;
+            bragg.k=k;
+            bragg.m=m;
+            bragg.Fhkl2=Fhkl2;
+            bragg.Fhkl=Fhkl;
+        end
+
+        function [h]     = plot_bragg(bragg)
+            import am_mbe.* am_lib.* am_dft.*
+            
+            % number of bragg structures (one for each cell)
+            nbraggs=numel(bragg);
+            % plot results
+            if nbraggs>1
+                for j = 1:nbraggs
+                    axes('position',[(0.1+0.87*(j-1)/nbraggs) 0.025 0.85/nbraggs 0.95]);
+                    h=plot_bragg(bragg{j}); 
+                    if j~=1
+                        set(gca,'YTickLabel',[]); ylabel('');
+                    end
+                end
+            else
+                % exclude everything with peak height smaller than threshold
+                ex_=bragg.Fhkl2>am_lib.eps; Fhkl2=bragg.Fhkl2(ex_); Fhkl=bragg.Fhkl(ex_); th2=bragg.th2(ex_); 
+                hkl=bragg.hkl(:,ex_); k=bragg.k(:,ex_); m=bragg.m(ex_);
+                % plot Bragg peaks
+                set(gcf,'color','w'); 
+                h=hggroup; label_threshold = 30;
+                for i = 1:numel(th2)
+                    line([0,Fhkl2(i)],[th2(i),th2(i)],'Parent',h);
+                    if Fhkl2(i) > label_threshold
+                        text(Fhkl2(i),th2(i),sprintf('  [%i%i%i]  %.3f^\\circ  %i',hkl(:,i),th2(i),m(i)),'Parent',h);
+                    end
+                end
+                box on; ylabel('2\theta [deg]'); ylim([5 115]); xlim([0 200]); %xlabel('intensity [a.u.]');
+                set(gca,'YTick',[0:10:130]); set(gca,'XTick',[]); grid on; set(gca,'YMinorGrid','on');
+            end
+        end
+        
+        function           tablulate_bragg(bragg,threshold)
+            % exclude everything with peak height smaller than threshold
+            ex_=bragg.Fhkl2>threshold; Fhkl2=bragg.Fhkl2(ex_); Fhkl=bragg.Fhkl(ex_); th2=bragg.th2(ex_); 
+            hkl=bragg.hkl(:,ex_); k=bragg.k(:,ex_); m=bragg.m(ex_);
+            %  print table
+            nks = numel(m);
+            fprintf('%5s %5s %5s %10s %5s %10s\n','h','k','l','2th [deg]','m','Fhkl^2 [%]');
+            fprintf('%5s %5s %5s %10s %5s %10s\n','-----','-----','-----','----------','-----','----------');
+            for i = 1:nks
+                fprintf('%5i %5i %5i %10.3f %5i %10.3f\n',hkl(:,i),th2(:,i),m(i),Fhkl2(i));
+            end
+        end
         
     end
     
