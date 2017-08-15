@@ -170,6 +170,8 @@ classdef am_mbe
     
     methods (Static)
         
+        % demos
+        
         function           demo_simulate_xrr()
             %
             % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
@@ -184,7 +186,7 @@ classdef am_mbe
             % roughness [nm]            inteface roughness
             % 
             
-            import am_mbe.*
+            import am_mbe.* am_dft.*
             
             % define photon energy and angles
             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
@@ -240,9 +242,10 @@ classdef am_mbe
             g   = gaussw_(N,alpha).*gaussw_(N,alpha).';
             data= conv2(log(data+min(data(data(:)>0))),g,'same');
             
-
-            kz = 2/(lambda).*sind(th2/2).*cosd(th2/2-w);
-            kx =-2/(lambda).*sind(th2/2).*sind(th2/2-w);
+            % convert to angular units
+            kz_ = @(w,th2,lambda)  2/(lambda).*sind(th2/2).*cosd(th2/2-w);
+            kx_ = @(w,th2,lambda) -2/(lambda).*sind(th2/2).*sind(th2/2-w);
+            kz = kz_(w,th2,lambda); kx = kx_(w,th2,lambda);
 
             figure(1); set(gcf,'color','w');
             contourf(kx,kz,data,'edgecolor','none');
@@ -254,14 +257,14 @@ classdef am_mbe
             % contourf(hk,l,log(d.data));
         end
         
-        function           demo_xrd_fit()
+        function           demo_w2th_fit()
             %
             clear; clc; import am_mbe.*
             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
             d  = xrdmlread('~/Downloads/ZW628_70minPbZr0p3Ti0p7O3_onSrTiO3_tth.xrdml');
             % semilogy(d.Theta2,d.data)
             domain = [18,25];
-            [d,th2] = analyze_xrd_with_fit(d.Theta2,d.data,hv,domain);
+            [d,th2] = analyze_w2th_with_fit(d.Theta2,d.data,hv,domain);
         end
         
         function           demo_xrr_fit()
@@ -291,7 +294,7 @@ classdef am_mbe
         end
         
         function           demo_pole_figure()
-            clear; clc; import am_mbe.* am_lib.*
+            clear; clc; import am_mbe.* am_lib.* am_dft.*
             % define photon energy and angles
             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
 
@@ -322,6 +325,9 @@ classdef am_mbe
             annotate_pole_figure_angle
 
         end
+        
+        
+        % XRR
         
         function           analyze_xrr_with_fft(th,intensity,hv,thc)
             %
@@ -356,7 +362,7 @@ classdef am_mbe
             % resample Fq,q on equidistant intervals
             qe = linspace(min(q),max(q),nqs).'; Fq = interp1(q,Fq,qe); q = qe; 
             % apply background correction
-            Fq = (Fq.*q.^4-mean(Fq.*q.^4)) .* tukey_(nqs,0.90);
+            Fq = (Fq.*q.^4-mean(Fq.*q.^4)) .* tukeyw_(nqs,0.90);
             % evalute DFT
             x  = [0:0.5:200]; 
             K  = exp(-1i*x(:).*q(:).');
@@ -502,84 +508,6 @@ classdef am_mbe
             end
         end
         
-        function           analyze_xrd_with_fft(th2,intensity,hv,domain)
-            %
-            % beta = analyze_xrd_with_fft(th,xrr,hv,domain)
-            % 
-            % th         [deg]          incident x-ray angle
-            % xintensity [a.u.]         xrr intensity
-            % hv         [eV]           photon energy
-            % domain     [deg]          (optional) [min max]
-            %
-            % Example:
-            % ex_ = th<1.8;
-            % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv,0.36)
-            % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv)
-            %
-
-            import am_mbe.*
-            
-            % resample intensity and q on equidistant intervals
-            q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
-            % if window is defined, crop and filter
-            if nargin > 3; if ~isempty(domain)
-                ex_ = and( th2 < max(domain) , th2 > min(domain) );
-                th2 = th2(ex_); q = q(ex_); Fq = Fq(ex_); Fq = Fq .* tukey_(numel(Fq),0.90); 
-            end; end
-            % evalute DFT
-            x  = [0:0.5:200]; 
-            K  = exp(-1i*x(:).*q(:).');
-            Fx = K*Fq(:);
-            % evaluate FFT
-            nxs=2^10;
-            x_fft = [0:nxs-1]/(nxs)/(q(2)-q(1))*pi*2; x_fft = x_fft([1:floor(nxs/2)]);
-            F_fft = fft(Fq,2^10);                     F_fft = F_fft([1:floor(nxs/2)]);
-            % plot th, Fx, and Fq
-            subplot(2,1,1); semilogy(th2,Fq,'-'); xlabel('2\theta [deg]'); ylabel('Intensity [a.u.]'); axis tight;
-            subplot(2,1,2); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200]);
-        end
-        
-        function [d,th2c]= analyze_xrd_with_fit(th2,intensity,hv,domain,profile)
-            %
-            % beta = analyze_xrd_with_fit(th,xrr,hv)
-            % 
-            % th         [deg]          incident x-ray angle
-            % xintensity [a.u.]         xrr intensity
-            % hv         [eV]           photon energy
-            % domain     [deg]          (optional) [min max]
-            %
-
-            import am_mbe.* am_lib.*
-           
-            % if window is defined, crop
-            if nargin > 3 || ~isempty(domain)
-                ex_ = and( th2 < max(domain) , th2 > min(domain) ); th2 = th2(ex_); intensity = intensity(ex_);
-            end
-            if nargin < 5
-                profile='pvoigt'; 
-            end
-            
-            % resample intensity and q on equidistant intervals
-            q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; 
-            intensity = interp1(q,intensity,qe); intensity(intensity==0)=min(intensity(intensity~=0));
-            q = qe; th2 = 2*get_th(q,hv);
-            
-            % perform fit
-            [c,f] = fit_peak_(q,intensity,profile);
-            
-            % thickness (or width) and maximum
-            switch profile
-                case {'sinc+pvoigt','sinc','pvoigt'}
-                    d = 2*pi./c(3); th2c = 2*get_th(c(2),hv);
-                otherwise
-                    asdfsd 
-                    % function parameters are not defined
-            end
-            
-            semilogy(th2,f,th2,intensity); axis tight; xlabel('2\theta [deg]'); ylabel('Intensity [a.u.]');
-            title(sprintf('thickness (or width) = %.2f nm; 2\\theta_c = %.3f deg',d,th2c));
-        end
-        
         function [intensity] = simulate_xrr(layer,th,hv,thickness,filling,roughness,sample_length,method)
             %
             % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
@@ -706,6 +634,156 @@ classdef am_mbe
             end
         end
 
+        
+        % w2th
+        
+        function           analyze_w2th_with_fft(th2,intensity,hv,domain)
+            %
+            % beta = analyze_xrd_with_fft(th,xrr,hv,domain)
+            % 
+            % th         [deg]          incident x-ray angle
+            % xintensity [a.u.]         xrr intensity
+            % hv         [eV]           photon energy
+            % domain     [deg]          (optional) [min max]
+            %
+            % Example:
+            % ex_ = th<1.8;
+            % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv,0.36)
+            % analyze_xrr_with_fft(th(ex_),intensity(ex_),hv)
+            %
+
+            import am_mbe.*
+            
+            % resample intensity and q on equidistant intervals
+            q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
+            % if window is defined, crop and filter
+            if nargin > 3; if ~isempty(domain)
+                ex_ = and( th2 < max(domain) , th2 > min(domain) );
+                th2 = th2(ex_); q = q(ex_); Fq = Fq(ex_); Fq = Fq .* tukey_(numel(Fq),0.90); 
+            end; end
+            % evalute DFT
+            x  = [0:0.5:200]; 
+            K  = exp(-1i*x(:).*q(:).');
+            Fx = K*Fq(:);
+            % evaluate FFT
+            nxs=2^10;
+            x_fft = [0:nxs-1]/(nxs)/(q(2)-q(1))*pi*2; x_fft = x_fft([1:floor(nxs/2)]);
+            F_fft = fft(Fq,2^10);                     F_fft = F_fft([1:floor(nxs/2)]);
+            % plot th, Fx, and Fq
+            subplot(2,1,1); semilogy(th2,Fq,'-'); xlabel('2\theta [deg]'); ylabel('Intensity [a.u.]'); axis tight;
+            subplot(2,1,2); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200]);
+        end
+        
+        function [d,th2c]= analyze_w2th_with_fit(th2,intensity,hv,domain,profile)
+            %
+            % beta = analyze_xrd_with_fit(th,xrr,hv)
+            % 
+            % th         [deg]          incident x-ray angle
+            % xintensity [a.u.]         xrr intensity
+            % hv         [eV]           photon energy
+            % domain     [deg]          (optional) [min max]
+            %
+
+            import am_mbe.* am_lib.*
+           
+            % if window is defined, crop
+            if nargin > 3 || ~isempty(domain)
+                ex_ = and( th2 < max(domain) , th2 > min(domain) ); th2 = th2(ex_); intensity = intensity(ex_);
+            end
+            if nargin < 5
+                profile='pvoigt'; 
+            end
+            
+            % resample intensity and q on equidistant intervals
+            q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; 
+            intensity = interp1(q,intensity,qe); intensity(intensity==0)=min(intensity(intensity~=0));
+            q = qe; th2 = 2*get_th(q,hv);
+            
+            % perform fit
+            [c,f] = fit_peak_(q,intensity,profile);
+            
+            % thickness (or width) and maximum
+            switch profile
+                case {'sinc+pvoigt','sinc','pvoigt'}
+                    d = 2*pi./c(3); th2c = 2*get_th(c(2),hv);
+                otherwise
+                    asdfsd 
+                    % function parameters are not defined
+            end
+            
+            semilogy(th2,f,th2,intensity); axis tight; xlabel('2\theta [deg]'); ylabel('Intensity [a.u.]');
+            title(sprintf('thickness (or width) = %.2f nm; 2\\theta_c = %.3f deg',d,th2c));
+        end
+        
+        
+        % RSM 
+        
+        function           plot_xrd_diffraction_plane(uc,v1,v2,hv,C)
+            % hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1'); 
+            % C = inv((ones(3)-eye(3))/2);
+            % v1=[1;1;0]; v2=[0;0;1];
+            % plot_xrd_diffraction_plane(uc,v1,v2,hv,C)
+            
+            
+            import am_mbe.* am_lib.*
+            
+            % set xray energy [eV] and wavelength [nm]
+            lambda = get_photon_energy(hv);
+
+            % get miller indicies [hkl] excluding gamma
+            N=6; hkl=permn_([N:-1:-N],3).'; hkl=hkl(:,~all(hkl==0,1));
+            % get reciprocal basis vectors [1/nm]
+            recbas = inv(uc.bas*0.1).';
+            % covert to cart [1/nm] and sort by distances
+            k=recbas*hkl; [~,i]=sort(normc_(k)); k=k(:,i); hkl=hkl(:,i);
+            % identify values which cannot be reached by diffractometer
+            th2_max=180; ex_=lambda*normc_(k)/2<sind(th2_max/2); k=k(:,ex_); hkl=hkl(:,ex_); nks=size(hkl,2);
+
+            % get structure factors
+            [Fhkl] = get_structure_factor(uc,k,hv); Fhkl2= abs(Fhkl).^2; Fhkl2 = Fhkl2./max(Fhkl2)*100;
+
+            % define plane (ensure directional vectors are normalized)
+            vx=v1(:); vz=v2(:); vy=cross(vz,vx); vx=vx./norm(vx); vy=vy./norm(vy); vz=vz./norm(vz);
+
+            % get in-plane and out of plane components
+            kx = vx.'*k; ky = vy.'*k;  kz = vz.'*k; 
+
+            % recover th2 and w values to determine which points are accessible
+            [alpha_i,alpha_f] = kxkz2angle(kx,kz,hv,'in/exit');
+
+            % exclude points based on incident and exit angles AND ensure that the point is in the diffraction plane
+            ex_ = and(alpha_i>0,alpha_i<150) & and(alpha_f>0,alpha_f<180-alpha_i) & abs(ky)<0.01;
+
+            % plot and label points
+            figure(1);clf;set(gcf,'color','w'); 
+            scatter(kx(ex_),kz(ex_),(Fhkl2(ex_)+1),'filled');
+            for i = 1:nks; if ex_(i); if Fhkl2(i)>1
+                text(kx(i),kz(i)+0.7,sprintf('[%i%i%i]',C*hkl(:,i)),'BackgroundColor','w','HorizontalAlignment','center','VerticalAlignment','bottom')
+            end; end; end
+
+            % plot accessible region
+            hold on; plot_xrd_diffraction_plane_accessible(hv); hold off;
+
+            % tidy
+            view([0 0 1]); box on; axis tight; daspect([1 1 1]); grid off;
+        end
+        
+        function           plot_xrd_diffraction_plane_accessible(hv)
+            import am_mbe.*
+            % generate accessible-region
+            N = 50; alpha_i=zeros(N); alpha_f=zeros(N);
+            alpha_i = repmat(linspace(0,180,N),N,1); 
+            for i = 1:N; alpha_f(:,i) = linspace(0,180-alpha_i(1,i),N); end
+            w = alpha_i; th2 = alpha_i+alpha_f;
+            % convert to reciprocal coordinates
+            [kx,kz] = angle2kxkz(w,th2,hv);
+            % plot 
+            h = surf(kx,kz,-ones(N),'facecolor','w');
+        end
+        
+        
+        % pole figures
+        
         function [h]     = plot_pole_figure(phi,chi,data,flag)
             
             import am_lib.*
@@ -837,7 +915,7 @@ classdef am_mbe
             % Atomic Data and Nuclear Data Tables 54, 181 (1993). 
             %
             
-            import am_mbe.*
+            import am_mbe.* am_dft.*
             
             [f0,f1,f2] = get_atomic_xray_form_factor(Z,hv,th); % [nZs,nhvs,nths]
             n = 1 - am_mbe.r_0 ./ (2*pi) .* get_photon_wavelength(hv).^2 .* sum(( + f0 + f1 - f2*1i ).*atomic_density(:),1);
@@ -860,22 +938,6 @@ classdef am_mbe
             
         end
 
-        function [qz]    = get_qz(th,hv)
-            
-            import am_mbe.*
-            
-            qz = 4*pi./get_photon_wavelength(hv) .* sind(th);
-            
-        end
-
-        function [th]    = get_th(qz,hv)
-            
-            import am_mbe.*
-            
-            th = asind( get_photon_wavelength(hv)*qz/(4*pi) );
-            
-        end
-        
         function [th2]   = get_bragg_angle(hv,a,hkl)
             
             import am_mbe.*
@@ -888,10 +950,20 @@ classdef am_mbe
         end
         
         
+        % structural
+        
+        function [Fhkl]  = get_structure_factor(uc,k,hv)
+            import am_mbe.get_photon_wavelength am_lib.normc_ am_dft.get_atomic_number am_mbe.get_atomic_xray_form_factor
+            lambda = get_photon_wavelength(hv);
+            th2 = 2*asind(lambda*normc_(k)/2);
+            [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
+            f0 = permute(get_atomic_xray_form_factor(Z,hv,th2/2),[1,3,2]);
+            Fhkl = sum(f0(i,:).*exp(2i*pi*(uc.bas*0.1*uc.tau).'*k),1); 
+        end
         
         function [bragg] = get_bragg(uc)
            import am_mbe.* am_lib.* am_dft.*
-          
+           
             % generate hkl list
             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1'); lambda = get_photon_energy(hv);
             % get miller indicies [hkl] excluding gamma
@@ -900,41 +972,35 @@ classdef am_mbe
             recbas = inv(uc.bas*0.1).';
             % covert to cart [1/nm] and sort by distances
             k=recbas*hkl; [~,i]=sort(normc_(k)); k=k(:,i); hkl=hkl(:,i);
-            % exclude values which cannot be reached by diffractometer
-            th2_max=110; ex_=lambda*normc_(k)/2<sind(th2_max/2); hkl=hkl(:,ex_); k=k(:,ex_);
+            % identify values which cannot be reached by diffractometer
+            th2_max=120; ex_=lambda*normc_(k)/2<sind(th2_max/2); k=k(:,ex_); hkl=hkl(:,ex_);
+            
+            % get 2th value
+            th2 = 2*asind(lambda*normc_(k)/2);
             
             % find unique hkls
-            switch 'exact'
-                case 'exact'
-                    % get point symmetries
-                    [~,~,~,R] = get_symmetries(uc);                    
-                    % check that inversion is present, if not add it due to time reversal
-                    if ~any(abs(sum(reshape(R,9,[])+reshape(eye(3),9,1),1))<am_lib.eps)
-                        nRs = size(R,3); R(:,:,nRs+[1:nRs]) = -R(:,:,[1:nRs]);
-                    end
-                    % define function to apply symmetries to position vectors
-                    sym_apply_ = @(R,tau) reshape(matmul_(R(1:3,1:3,:),tau),3,[],size(R,3));
-                    % convert point symmetries [frac -> recp-cart]
-                    R = matmul_(matmul_(recbas,permute(R,[2,1,3])),inv(recbas));
-                    % get permutation matrix and construct a sparse binary representation 
-                    PM = member_(sym_apply_(R,k),k,1E-5); A = get_connectivity(PM);
-                    % get irreducible k-points
-                    i2p = round(findrow_(A)).'; %p2i = round(([1:size(A,1)]*A));
-                    % record irreducible kponts and multiplicity
-                    k = k(:,i2p); hkl=hkl(:,i2p); m = sum(A,2).';
-                case 'fast'
-                    % find unique hkls by comparing distances
-                    [~,i] = unique(rnd_(normc_(k))); k=k(:,i(2:end)); hkl=hkl(:,i(2:end)); m = ones(1,numel(i));
-            end
+                % get point symmetries
+                [~,~,~,R] = get_symmetries(uc);                    
+                % check that inversion is present, if not add it due to time reversal
+                if ~any(abs(sum(reshape(R,9,[])+reshape(eye(3),9,1),1))<am_lib.eps)
+                    nRs = size(R,3); R(:,:,nRs+[1:nRs]) = -R(:,:,[1:nRs]);
+                end
+                % define function to apply symmetries to position vectors
+                sym_apply_ = @(R,tau) reshape(matmul_(R(1:3,1:3,:),tau),3,[],size(R,3));
+                % convert point symmetries [frac -> recp-cart]
+                R = matmul_(matmul_(recbas,permute(R,[2,1,3])),inv(recbas));
+                % get permutation matrix and construct a sparse binary representation 
+                PM = member_(sym_apply_(R,k),k,1E-5); A = get_connectivity(PM);
+                % get irreducible k-points
+                i2p = round(findrow_(A)).'; %p2i = round(([1:size(A,1)]*A));
+                % record irreducible kponts and multiplicity
+                k = k(:,i2p); hkl=hkl(:,i2p); m = sum(A,2).';
             
-            % compute angles
-            th2 = 2*asind( lambda * normc_(k) / 2 );
-
-            % get structure factor
-            [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
-            f0 = permute(get_atomic_xray_form_factor(Z,hv,th2),[1,3,2]);
-            Fhkl = sum(f0(i,:).*exp(2i*pi*uc.tau.'*hkl),1); Fhkl2= abs(Fhkl).^2; 
-            Fhkl2 = Fhkl2./max(Fhkl2)*100;
+            % get structure factors
+                [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
+                f0 = permute(get_atomic_xray_form_factor(Z,hv,th2/2),[1,3,2]);
+                Fhkl = sum(f0(i,:).*exp(2i*pi*uc.tau.'*hkl),1); Fhkl2= abs(Fhkl).^2; 
+                Fhkl2 = Fhkl2./max(Fhkl2)*100;
             
             % save structure
             bragg.th2=th2;
@@ -943,10 +1009,11 @@ classdef am_mbe
             bragg.m=m;
             bragg.Fhkl2=Fhkl2;
             bragg.Fhkl=Fhkl;
+            bragg.isaccessible=ex_;
         end
 
         function [h]     = plot_bragg(bragg)
-            import am_mbe.* am_lib.* am_dft.*
+            import am_lib.* am_dft.*
             
             % number of bragg structures (one for each cell)
             nbraggs=numel(bragg);
@@ -990,6 +1057,104 @@ classdef am_mbe
             end
         end
         
+        
+        % planar diffraction
+        
+    end
+    
+    % unit conversion
+    
+    methods (Static)
+        
+        function [varargout] = kxkz2angle(kx,kz,hv,flag)
+            % [alpha_i,alpha_f] = kxkz2angle(kx,kz,hv,'in/exit')
+            % [   w   ,  th2  ] = kxkz2angle(kx,kz,hv,'w2th')
+            
+            import am_mbe.*
+            
+            lambda = get_photon_energy(hv);
+            
+            th2_ = @(kx,kz,lambda) 2.*atan2d(...
+                 real(sqrt(     kx.^2 + kz.^2).*lambda),...
+                 real(sqrt(4 - (kx.^2 + kz.^2).*lambda.^2)));
+            w_   = @(kx,kz,lambda)  atan2d(...
+                 real( +(kz.*kx.^2.*lambda + kz.^3.*lambda + kx.*sqrt(kx.^2+kz.^2).*sqrt(4-kx.^2.*lambda.^2-kz.^2.*lambda.^2))./(kx.^2+kz.^2) ), ...
+                 real( -(kx.*kz.^2.*lambda + kx.^3.*lambda - kz.*sqrt(kx.^2+kz.^2).*sqrt(4-kx.^2.*lambda.^2-kz.^2.*lambda.^2))./(kx.^2+kz.^2) ));
+             
+            switch flag
+                case 'in/exit'
+                    % recover th2 and w values to determine which points are accessible
+                    alpha_i =   w_(kx,kz,lambda); 
+                    alpha_f = th2_(kx,kz,lambda)-alpha_i;
+                    varargout{1} = alpha_i;
+                    varargout{2} = alpha_f;
+                case 'w2th'
+                    varargout{1} =   w_(kx,kz,lambda);
+                    varargout{2} = th2_(kx,kz,lambda);
+            end
+        end
+        
+        function [kx,kz]     = angle2kxkz(w,th2,hv)
+            % [kx,kz] = angle2kxkz(w,th2,hv)
+            
+            import am_mbe.*
+            
+            lambda = get_photon_energy(hv);
+            
+            % convert to reciprocal coordinates
+            kx_ = @(w,th2,lambda) -2/(lambda).*sind(th2/2).*sind(th2/2-w);
+            kz_ = @(w,th2,lambda)  2/(lambda).*sind(th2/2).*cosd(th2/2-w);
+            kx = kx_(w,th2,lambda); kz = kz_(w,th2,lambda);
+        end
+
+        % NOTE: INCONSISTENT DEFINITIONS. REMOVE 4 PI FACTOR.
+        
+        function [qz]        = get_qz(th,hv)
+            
+            import am_mbe.*
+            
+            qz = 4*pi./get_photon_wavelength(hv) .* sind(th);
+            
+        end
+
+        function [th]        = get_th(qz,hv)
+            
+            import am_mbe.*
+            
+            th = asind( get_photon_wavelength(hv)*qz/(4*pi) );
+            
+        end
+          
+        function [hv]        = get_photon_energy(lambda)
+            %
+            % E = get_photon_energy(lambda)
+            % 
+            % E      [eV]           photon energy
+            % lambda [nm]           photon wavelength
+            %
+            % Conversion factor = 
+            %       Plank's constant * speed of light / nm / eV
+            %
+            
+            hv = 1239.842 ./ lambda;
+            
+        end
+        
+        function [lambda]    = get_photon_wavelength(hv)
+            %
+            % E = get_photon_energy(lambda)
+            % 
+            % E      [eV]           photon energy
+            % lambda [nm]           photon wavelength
+            %
+            % Conversion factor = 
+            %       Plank's constant * speed of light / nm / eV
+            %
+            
+            lambda = 1239.842 ./ hv;
+            
+        end
+        
     end
     
     % materials-related things
@@ -998,7 +1163,7 @@ classdef am_mbe
         
         function [layer] = define_material(species,stoichiometry,mass_density)
 
-            import am_mbe.*
+            import am_mbe.* am_dft.*
 
             define_layer = @(species,stoichiometry,mass_density) struct(...
                 'species',{species},'Z',get_atomic_number(species),...
@@ -1010,104 +1175,13 @@ classdef am_mbe
             layer.molecular_weight = sum(get_atomic_mass(layer.Z) .* layer.stoichiometry) ./ sum(layer.stoichiometry);
             % atomic density [atoms/nm^3]: (g/cm^3 * f.u./amu * atoms/f.u.) / (atoms/nm^3) = 602.24
             layer.atomic_density = layer.mass_density / layer.molecular_weight * 602.24;
+        end
 
-        end
-        
-        function [h]     = cubic2hex(a)
-            % hexagonal in-plane lattice parameter for 111-oriented of a cubic material
-            h = a/sqrt(1-cosd(120));
-            
-        
-        end
     end
     
     % atom-related things
     
     methods (Static)
-        
-        function [Z]     = get_atomic_number(symb)
-            %
-            % Z = get_atomic_number(symb)
-            % 
-            % symb  atomic symbol
-            % Z     atomic number
-            % 
-            symbol_database = {...
-                 'h'  ,'he' ,'li' ,'be' ,'b'  ,'c'  ,'n'  ,'o'  ,'f'  ,'ne' ,'na' ,'mg' ,'al' ,'si' ,'p'  ,'s'  , ...
-                 'cl' ,'ar' ,'k'  ,'ca' ,'sc' ,'ti' ,'v'  ,'cr' ,'mn' ,'fe' ,'co' ,'ni' ,'cu' ,'zn' ,'ga' ,'ge' , ...
-                 'as' ,'se' ,'br' ,'kr' ,'rb' ,'sr' ,'y'  ,'zr' ,'nb' ,'mo' ,'tc' ,'ru' ,'rh' ,'pd' ,'ag' ,'cd' , ...
-                 'in' ,'sn' ,'sb' ,'te' ,'i'  ,'xe' ,'cs' ,'ba' ,'la' ,'ce' ,'pr' ,'nd' ,'pm' ,'sm' ,'eu' ,'gd' , ...
-                 'tb' ,'dy' ,'ho' ,'er' ,'tm' ,'yb' ,'lu' ,'hf' ,'ta' ,'w'  ,'re' ,'os' ,'ir' ,'pt' ,'au' ,'hg' , ...
-                 'tl' ,'pb' ,'bi' ,'po' ,'at' ,'rn' ,'fr' ,'ra' ,'ac' ,'th' ,'pa' ,'u'  ,'np' ,'pu' ,'am' ,'cm' , ...
-                 'bk' ,'cf' ,'es' ,'fm' ,'md' ,'no' ,'lr' ,'rf' ,'db' ,'sg' ,'bh' ,'hs' ,'mt' ,'ds' ,'rg' ,'uub', ...
-                 'uut','uuq','uup','uuh'}; 
-            if iscell(symb)
-                nZs = numel(symb); Z = zeros(1,nZs);
-                for i = 1:nZs
-                    Z(i) = find(strcmp(strtrim(lower(symb{i})),symbol_database));
-                end
-            else
-                Z = find(strcmp(strtrim(lower(symb)),symbol_database));
-            end
-        end
-        
-        function [symb]  = get_atomic_symbol(Z)
-            %
-            % Z = get_atomic_number(symb)
-            % 
-            % symb  atomic symbol
-            % Z     atomic number
-            % 
-            symbol_database = {...
-                 'h'  ,'he' ,'li' ,'be' ,'b'  ,'c'  ,'n'  ,'o'  ,'f'  ,'ne' ,'na' ,'mg' ,'al' ,'si' ,'p'  ,'s'  , ...
-                 'cl' ,'ar' ,'k'  ,'ca' ,'sc' ,'ti' ,'v'  ,'cr' ,'mn' ,'fe' ,'co' ,'ni' ,'cu' ,'zn' ,'ga' ,'ge' , ...
-                 'as' ,'se' ,'br' ,'kr' ,'rb' ,'sr' ,'y'  ,'zr' ,'nb' ,'mo' ,'tc' ,'ru' ,'rh' ,'pd' ,'ag' ,'cd' , ...
-                 'in' ,'sn' ,'sb' ,'te' ,'i'  ,'xe' ,'cs' ,'ba' ,'la' ,'ce' ,'pr' ,'nd' ,'pm' ,'sm' ,'eu' ,'gd' , ...
-                 'tb' ,'dy' ,'ho' ,'er' ,'tm' ,'yb' ,'lu' ,'hf' ,'ta' ,'w'  ,'re' ,'os' ,'ir' ,'pt' ,'au' ,'hg' , ...
-                 'tl' ,'pb' ,'bi' ,'po' ,'at' ,'rn' ,'fr' ,'ra' ,'ac' ,'th' ,'pa' ,'u'  ,'np' ,'pu' ,'am' ,'cm' , ...
-                 'bk' ,'cf' ,'es' ,'fm' ,'md' ,'no' ,'lr' ,'rf' ,'db' ,'sg' ,'bh' ,'hs' ,'mt' ,'ds' ,'rg' ,'uub', ...
-                 'uut','uuq','uup','uuh'}; 
-            nZs = numel(Z); symb = cell(1,nZs);
-            for i = 1:nZs
-                symb(i) = symbol_database(Z(i));
-            end
-        end
-
-        function [m]     = get_atomic_mass(Z)
-            %
-            % m = get_atomic_mass(Z)
-            % 
-            % Z     atomic number
-            % m     atomic mass
-            % 
-            mass_database = [...
-                    1.007947000,     4.002602000,     6.941200000,     9.012182000,    10.811500000, ...
-                   12.011100000,    14.006747000,    15.999430000,    18.998403000,    20.179760000, ...
-                   22.989769000,    24.305060000,    26.981540000,    28.085530000,    30.973762000, ...
-                   32.066600000,    35.452790000,    39.948100000,    39.098310000,    40.078900000, ...
-                   44.955911000,    47.883000000,    50.941510000,    51.996160000,    54.938051000, ...
-                   55.847300000,    58.933201000,    58.693400000,    63.546300000,    65.392000000, ...
-                   69.723100000,    72.612000000,    74.921592000,    78.963000000,    79.904000000, ...
-                   83.801000000,    85.467830000,    87.621000000,    88.905852000,    91.224200000, ...
-                   92.906382000,    95.941000000,    98.000000000,   101.072000000,   102.905503000, ...
-                  106.421000000,   107.868220000,   112.411800000,   114.821000000,   118.710700000, ...
-                  121.757000000,   127.603000000,   126.904473000,   131.292000000,   132.905435000, ...
-                  137.327700000,   138.905520000,   140.115400000,   140.907653000,   144.243000000, ...
-                  145.000000000,   150.363000000,   151.965900000,   157.253000000,   158.925343000, ...
-                  162.503000000,   164.930323000,   167.263000000,   168.934213000,   173.043000000, ...
-                  174.967100000,   178.492000000,   180.947910000,   183.853000000,   186.207100000, ...
-                  190.210000000,   192.223000000,   195.083000000,   196.966543000,   200.593000000, ...
-                  204.383320000,   207.210000000,   208.980373000,   209.000000000,   210.000000000, ...
-                  222.000000000,   223.000000000,   226.025000000,   227.028000000,   232.038110000, ...
-                  231.035900000,   238.028910000,   237.048000000,   244.000000000,   243.000000000, ...
-                  247.000000000,   247.000000000,   251.000000000,   252.000000000,   257.000000000, ...
-                  258.000000000,   259.000000000,   262.000000000,   261.000000000,   262.000000000, ...
-                  263.000000000,   262.000000000,   265.000000000,   266.000000000]; 
-            nZs = numel(Z); m = zeros(1,nZs);
-            for i = 1:nZs
-                m(i) = mass_database(Z(i));
-            end
-        end
         
         function [f0,f1,f2] = get_atomic_xray_form_factor(Z,hv,th)
             %
@@ -1115,6 +1189,7 @@ classdef am_mbe
             % 
             % Z      [Z]            atomic number
             % hv     [eV]           photon energy
+            % th     [deg]          angle
             % f0     [e-/atom]      atomic scattering factor
             % f1     [e-/atom]      atomic scattering factor
             % f2     [e-/atom]      atomic scattering factor
@@ -1140,8 +1215,8 @@ classdef am_mbe
             %
             % using f0 values computed from Cromer Mann coefficients.
             
-            import am_mbe.*
-            
+            import am_mbe.* am_dft.*
+             
             nZs = numel(Z); nths = numel(th); nhvs = numel(hv); f0 = zeros(nZs,nhvs,nths); 
             for i = 1:nZs
                 % get f0 analytically from Cromer-Mann coefficients
@@ -1293,7 +1368,7 @@ classdef am_mbe
             end
         end
 
-        function [hv]    = get_atomic_emission_line_energy(Z,emission_line)
+        function [hv]       = get_atomic_emission_line_energy(Z,emission_line)
             %
             % hv = get_xray_energy(Z,emission_line)
             % 
@@ -1400,42 +1475,8 @@ classdef am_mbe
             
             line_database = {'kalpha1','kalpha2','kbeta1','lalpha1','lalpha2','lbeta1','lbeta2','lgamma1'};
             j = find(strcmp(strtrim(lower(emission_line)),line_database));
-
             hv = xray_database(Z,j)*1E3;
-
         end
-        
-        function [hv]    = get_photon_energy(lambda)
-            %
-            % E = get_photon_energy(lambda)
-            % 
-            % E      [eV]           photon energy
-            % lambda [nm]           photon wavelength
-            %
-            % Conversion factor = 
-            %       Plank's constant * speed of light / nm / eV
-            %
-            
-            hv = 1239.842 ./ lambda;
-            
-        end
-        
-        function [lambda]= get_photon_wavelength(hv)
-            %
-            % E = get_photon_energy(lambda)
-            % 
-            % E      [eV]           photon energy
-            % lambda [nm]           photon wavelength
-            %
-            % Conversion factor = 
-            %       Plank's constant * speed of light / nm / eV
-            %
-            
-            lambda = 1239.842 ./ hv;
-            
-        end
-        
-        
         
     end
     
