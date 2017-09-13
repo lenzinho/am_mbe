@@ -199,7 +199,7 @@ classdef am_mbe
             layer(2) = define_material({'Si'},[1],2.53);
 
             thickness = [50 1E3];
-            roughness = [0 0];
+            roughness = [1 1];
             filling   = [1 1];
 
             % get dielectric contributions
@@ -224,6 +224,7 @@ classdef am_mbe
             ex_ = th<1.8; ex_ = th>0;
             analyze_xrr_with_fft(th(ex_),R_parratt(ex_),hv)
             subplot(3,1,1); hold on; plot(th(ex_),R_transfer(ex_),'.r');
+            fprintf('largest percentual difference between methods: %f %%\n',max(abs(R_parratt(ex_)-R_transfer(ex_))./R_parratt(ex_))*100)
         end
  
         function           demo_plot_rsm()
@@ -559,6 +560,13 @@ classdef am_mbe
                     % T = subs(T,z,0)
                     % simplify
                     % T = simplify(expand(T));
+                    % % This is exact when there is no roughness.
+                    % get_transfer_matrix_at_interface = @(k1,k2,sigma) [ ... 
+                    %       [ exp(1i*( - k1 + k2 )) * (k1 + k2), exp(1i*( - k1 - k2 ))*(k1 - k2)]
+                    %       [ exp(1i*( + k1 + k2 )) * (k1 - k2), exp(1i*( + k1 - k2 ))*(k1 + k2)] ] ./ (2*k1)];
+                    % to add roughness, see below.
+                    
+                    % hmm .. these two methods seem to be equivalent (when sigma == 1 and z == 1)? as they should be. 
                     get_transfer_matrix_at_interface = @(k1,k2,sigma) [ ...
                         [ (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1), (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1)]
                         [ (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1), (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1)] ];
@@ -953,7 +961,7 @@ classdef am_mbe
         % structural
         
         function [Fhkl]  = get_structure_factor(uc,k,hv)
-            import am_mbe.get_photon_wavelength am_lib.normc_ am_dft.get_atomic_number am_mbe.get_atomic_xray_form_factor
+            import am_mbe.* am_lib.* am_dft.*
             lambda = get_photon_wavelength(hv);
             th2 = 2*asind(lambda*normc_(k)/2);
             [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
@@ -973,7 +981,7 @@ classdef am_mbe
             % covert to cart [1/nm] and sort by distances
             k=recbas*hkl; [~,i]=sort(normc_(k)); k=k(:,i); hkl=hkl(:,i);
             % identify values which cannot be reached by diffractometer
-            th2_max=120; ex_=lambda*normc_(k)/2<sind(th2_max/2); k=k(:,ex_); hkl=hkl(:,ex_);
+            th2_max=180; ex_=lambda*normc_(k)/2<sind(th2_max/2); k=k(:,ex_); hkl=hkl(:,ex_);
             
             % get 2th value
             th2 = 2*asind(lambda*normc_(k)/2);
@@ -997,10 +1005,7 @@ classdef am_mbe
                 k = k(:,i2p); hkl=hkl(:,i2p); m = sum(A,2).';
             
             % get structure factors
-                [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
-                f0 = permute(get_atomic_xray_form_factor(Z,hv,th2/2),[1,3,2]);
-                Fhkl = sum(f0(i,:).*exp(2i*pi*uc.tau.'*hkl),1); Fhkl2= abs(Fhkl).^2; 
-                Fhkl2 = Fhkl2./max(Fhkl2)*100;
+            [Fhkl]  = get_structure_factor(uc,k,hv); Fhkl2= abs(Fhkl).^2; Fhkl2 = Fhkl2./max(Fhkl2)*100;
             
             % save structure
             bragg.th2=th2;
