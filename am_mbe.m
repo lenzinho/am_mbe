@@ -325,14 +325,13 @@ classdef am_mbe
         function           demo_plot_rsm_wide_angle()
             clear;clc;import am_mbe.* am_lib.* am_dft.*
             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
-            lambda = get_photon_wavelength(hv);
             
             hold on; plot_xrd_diffraction_plane_accessible(hv); hold off;
             
             [uc,~,~]=get_cell('material','SrTiO3');
             [bbz,iiz] = get_bbz(uc,hv);
             h = plot_iiz_2D(iiz,'linewidth',1);
-            h = plot_bbz_2D(bbz,[0 0 1],[1 0 0],'linewidth',2);
+            h = plot_bbz_2D(bbz,[0 0 1],[1 1 0],'linewidth',2);
         end
         
         function           demo_plot_xrr_diffuse()
@@ -440,7 +439,7 @@ classdef am_mbe
         
         % XRR
         
-        function           analyze_xrr_with_fft(th,I,hv,thc)
+        function            analyze_xrr_with_fft(th,I,hv,thc)
             %
             % beta = analyze_xrr_with_fft(th,I,hv,thc)
             % 
@@ -492,7 +491,7 @@ classdef am_mbe
             subplot(3,1,3); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200]);
         end
 
-        function [x]     = analyze_xrr_with_fit(th,intensity,hv,layer,x0,ub,lb,isfixed,domain)
+        function [x]      = analyze_xrr_with_fit(th,intensity,hv,layer,x0,ub,lb,isfixed,domain)
             import am_mbe.* am_lib.*
             
             % if window is defined, crop and filter
@@ -622,7 +621,7 @@ classdef am_mbe
             end
         end
         
-        function I = simulate_xrr(eta,th,hv,thickness,filling,roughness,sample_length,algo)
+        function I        = simulate_xrr(eta,th,hv,thickness,filling,roughness,sample_length,algo)
             %
             % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
             % 
@@ -743,7 +742,7 @@ classdef am_mbe
         
         % w2th
         
-        function           analyze_w2th_with_fft(th2,intensity,hv,domain)
+        function            analyze_w2th_with_fft(th2,intensity,hv,domain)
             %
             % beta = analyze_xrd_with_fft(th,xrr,hv,domain)
             % 
@@ -780,7 +779,7 @@ classdef am_mbe
             subplot(2,1,2); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200]);
         end
         
-        function [d,th2c]= analyze_w2th_with_fit(th2,intensity,hv,domain,profile)
+        function [d,th2c] = analyze_w2th_with_fit(th2,intensity,hv,domain,profile)
             %
             % beta = analyze_xrd_with_fit(th,xrr,hv)
             % 
@@ -824,57 +823,7 @@ classdef am_mbe
         
         % RSM 
         
-        function           plot_xrd_diffraction_plane(uc,v1,v2,hv,C)
-            % hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1'); 
-            % C = inv((ones(3)-eye(3))/2);
-            % v1=[1;1;0]; v2=[0;0;1];
-            % plot_xrd_diffraction_plane(uc,v1,v2,hv,C)
-            
-            
-            import am_mbe.* am_lib.*
-            
-            % set xray energy [eV] and wavelength [nm]
-            lambda = get_photon_energy(hv);
-
-            % get miller indicies [hkl] excluding gamma
-            N=6; hkl=permn_([N:-1:-N],3).'; hkl=hkl(:,~all(hkl==0,1));
-            % get reciprocal basis vectors [1/nm]
-            recbas = inv(uc.bas*0.1).';
-            % covert to cart [1/nm] and sort by distances
-            k=recbas*hkl; [~,i]=sort(normc_(k)); k=k(:,i); hkl=hkl(:,i);
-            % identify values which cannot be reached by diffractometer
-            th2_max=180; ex_=lambda*normc_(k)/2<sind(th2_max/2); k=k(:,ex_); hkl=hkl(:,ex_); nks=size(hkl,2);
-
-            % get structure factors
-            [Fhkl] = get_structure_factor(uc,k,hv); Fhkl2= abs(Fhkl).^2; Fhkl2 = Fhkl2./max(Fhkl2)*100;
-
-            % define plane (ensure directional vectors are normalized)
-            vx=v1(:); vz=v2(:); vy=cross(vz,vx); vx=vx./norm(vx); vy=vy./norm(vy); vz=vz./norm(vz);
-
-            % get in-plane and out of plane components
-            kx = vx.'*k; ky = vy.'*k;  kz = vz.'*k; 
-
-            % recover th2 and w values to determine which points are accessible
-            [alpha_i,alpha_f] = kxkz2angle(kx,kz,hv,'in/exit');
-
-            % exclude points based on incident and exit angles AND ensure that the point is in the diffraction plane
-            ex_ = and(alpha_i>0,alpha_i<150) & and(alpha_f>0,alpha_f<180-alpha_i) & abs(ky)<0.01;
-
-            % plot and label points
-            figure(1);clf;set(gcf,'color','w'); 
-            scatter(kx(ex_),kz(ex_),(Fhkl2(ex_)+1),'filled');
-            for i = 1:nks; if ex_(i); if Fhkl2(i)>1
-                text(kx(i),kz(i)+0.7,sprintf('[%i%i%i]',C*hkl(:,i)),'BackgroundColor','w','HorizontalAlignment','center','VerticalAlignment','bottom')
-            end; end; end
-
-            % plot accessible region
-            hold on; plot_xrd_diffraction_plane_accessible(hv); hold off;
-
-            % tidy
-            view([0 0 1]); box on; axis tight; daspect([1 1 1]); grid off;
-        end
-        
-        function           plot_xrd_diffraction_plane_accessible(hv)
+        function             plot_xrd_diffraction_plane_accessible(hv)
             import am_mbe.*
             % generate accessible-region
             N = 50; alpha_i=zeros(N); alpha_f=zeros(N);
@@ -890,7 +839,7 @@ classdef am_mbe
         
         % pole figures
         
-        function [h]     = plot_pole_figure(phi,chi,data,flag)
+        function [h]       = plot_pole_figure(phi,chi,data,flag)
             
             import am_lib.*
             
@@ -928,7 +877,7 @@ classdef am_mbe
             end
         end
         
-        function [angle] = annotate_pole_figure_angle()
+        function [angle]   = annotate_pole_figure_angle()
             import am_lib.*
             % get points
             [x2,y2]=ginput(2);
@@ -944,7 +893,7 @@ classdef am_mbe
             line(x2,y2,'color','w','linewidth',2); text(x2(end/2),y2(end/2),sprintf('%.2f',angle),'color','w','fontweight','bold')
         end
         
-        function           annotate_pole_figure_reference(x2,y2,flag,varargin)
+        function             annotate_pole_figure_reference(x2,y2,flag,varargin)
             import am_lib.*
             
             if nargin < 3; flag = 'phi,chi'; end
@@ -993,7 +942,7 @@ classdef am_mbe
             end
         end
 
-        function [thc]   = get_xray_critical_angle(delta)
+        function [thc]     = get_xray_critical_angle(delta)
             %
             % thc = photoabsorbtion_crosssection(Z,lambda)
             % 
@@ -1008,7 +957,7 @@ classdef am_mbe
             
         end
         
-        function [n]     = get_xray_refractive_index(Z,atomic_density,hv,th)
+        function [n]       = get_xray_refractive_index(Z,atomic_density,hv,th)
             %
             % n = get_xray_refractive_index(Z,atomic_density,hv,th)
             % 
@@ -1028,7 +977,7 @@ classdef am_mbe
             n = permute(n,[3,2,1]); % [nhvs,nths]
         end
 
-        function [mu]    = get_xray_linear_absorbtion_coeffcient(Z,atomic_density,hv)
+        function [mu]      = get_xray_linear_absorbtion_coeffcient(Z,atomic_density,hv)
             %
             % mu = get_xray_linear_absorbtion_coeffcient(Z,n,hv)
             % 
@@ -1044,7 +993,7 @@ classdef am_mbe
             
         end
 
-        function [th2]   = get_bragg_angle(hv,a,hkl)
+        function [th2]     = get_bragg_angle(hv,a,hkl)
             
             import am_mbe.*
             
@@ -1058,15 +1007,15 @@ classdef am_mbe
         
         % structural
         
-        function [Fhkl]  = get_structure_factor(uc,k,hv)
+        function [Fk]      = get_structure_factor(uc,k,hv)
             import am_mbe.* am_lib.* am_dft.*
             lambda = get_photon_wavelength(hv);
             th2 = 2*asind(lambda*normc_(k)/2);
             [Z,~,i] = unique(get_atomic_number({uc.symb{uc.species}}));
             f0 = permute(get_atomic_xray_form_factor(Z,hv,th2/2),[1,3,2]);
-            Fhkl = sum(f0(i,:).*exp(2i*pi*(uc.bas*0.1*uc.tau).'*k),1); 
+            Fk = sum(f0(i,:).*exp(2i*pi*(uc.bas*0.1*uc.tau).'*k),1); 
         end
-        
+
         function [bbz,iiz] = get_bbz(uc,hv,threshold)
             % bragg brillouin zone
             import am_mbe.* am_lib.* am_dft.*
@@ -1091,15 +1040,15 @@ classdef am_mbe
             % exclude reflections with diffraction intensities below the value
             Fk2= abs(Fk).^2; Fk2 = Fk2./max(Fk2)*100; ex_ = Fk2>threshold;
             % save structure
-            bb_ = @(hv,recbas,k,Fk2) struct('units','frac-recp',...
+            bb_ = @(hv,recbas,k,Fk2) struct('units','tau=frac-recp; bas=nm',...
                 'hv',hv,'recbas',recbas,'nks',size(k,2),'k',k,'w',ones(1,size(k,2)),'Fk2',Fk2);
             bbz = bb_(hv,recbas,k(:,ex_),Fk2(ex_));
             
-            % get symmetrically equivalent brag spots
+            % get symmetrically equivalent bragg spots
             [iiz,i2b,b2i] = get_ibz(bbz,uc,'nomod');
             iiz.i2b = i2b; iiz.b2i = b2i; iiz.Fk2 = iiz.Fk2(i2b);
             bbz.i2b = i2b; bbz.b2i = b2i; 
-            
+
             % print stuff
             fprintf(' (%.3f s) \n',toc);
             tabulate_bragg(iiz,hv,threshold)
@@ -1117,7 +1066,7 @@ classdef am_mbe
             end
         end
         
-        function [h]     = plot_iiz_1D(iiz)
+        function [h]       = plot_iiz_1D(iiz)
             import am_lib.* am_dft.*
             % number of bragg structures (one for each cell)
             niizs=numel(iiz);
@@ -1125,21 +1074,19 @@ classdef am_mbe
             if niizs>1
                 for j = 1:niizs
                     axes('position',[(0.1+0.87*(j-1)/niizs) 0.025 0.85/niizs 0.95]);
-                    h=plot_bragg(iiz{j}); 
-                    if j~=1
-                        set(gca,'YTickLabel',[]); ylabel('');
-                    end
+                    h=plot_iiz_1D(iiz{j}); 
+                    if j~=1; set(gca,'YTickLabel',[]); ylabel(''); end
                 end
             else
-                % exclude everything with peak height smaller than threshold
-                ex_=iiz.Fk2>am_lib.eps; Fk2=iiz.Fk2(ex_); th2=iiz.th2(ex_);  k=iiz.k(:,ex_); w=iiz.w(ex_);
                 % plot Bragg peaks
                 set(gcf,'color','w'); 
-                h=hggroup; label_threshold = 30;
-                for i = 1:numel(th2)
-                    line([0,Fk2(i)],[th2(i),th2(i)],'Parent',h);
+                h=hggroup; label_threshold = 0;
+                for i = 1:iiz.nks
+                    th2 = 2*get_th(norm(iiz.recbas*iiz.kz),iiz.hv);
+                    line([0,iiz.Fk2(i)],[th2,th2],'Parent',h);
                     if Fk2(i) > label_threshold
-                        text(Fk2(i),th2(i),sprintf('  [%i%i%i]  %.3f^\\circ  %i',k(:,i),th2(i),w(i)),'Parent',h);
+                        text(Fk2(i),th2(i),sprintf('  [%i%i%i]  %.3f^\\circ  %i',...
+                            iiz.k(:,i),th2,iiz.w(i)),'Parent',h);
                     end
                 end
                 box on; ylabel('2\theta [deg]'); ylim([5 115]); xlim([0 200]); %xlabel('intensity [a.u.]');
@@ -1147,7 +1094,7 @@ classdef am_mbe
             end
         end
         
-        function [h]     = plot_iiz_2D(iiz,varargin)
+        function [h]       = plot_iiz_2D(iiz,varargin)
             % [uc,~,~]=get_cell('material','SrTiO3');
             % [bragg] = get_bragg_poly_rings(uc,hv);
             % [h]     = plot_bragg_poly_rings(bragg,'linewidth',1.5);
@@ -1162,7 +1109,7 @@ classdef am_mbe
             end
         end
         
-        function [h]     = plot_bbz_2D(bbz,v1,v2,varargin)
+        function [h]       = plot_bbz_2D(bbz,v1,v2,varargin)
             import am_lib.*
             % see which points lie on the plane
             for i = 1:bbz.nks
@@ -1174,7 +1121,7 @@ classdef am_mbe
             end
             % exclude points not on the line
             bbz.k = bbz.k(:,ex_); bbz.Fk2 = bbz.Fk2(ex_); 
-            bbz.x = v1*bbz.recbas*bbz.k; bbz.y = v2*bbz.recbas*bbz.k;
+            bbz.x = v1*bbz.recbas*bbz.k/norm(v1); bbz.y = v2*bbz.recbas*bbz.k/norm(v2);
             bbz.b2i = bbz.b2i(ex_); bbz.w = bbz.w(ex_); bbz.nks = sum(ex_); 
             % plot points
             h=hggroup;
@@ -1209,7 +1156,6 @@ classdef am_mbe
             th2_ = @(kx,kz,lambda) 2.*atan2d(...
                  real(sqrt(    (kx.^2 + kz.^2).*lambda.^2 )),...
                  real(sqrt(4 - (kx.^2 + kz.^2).*lambda.^2 )));
-%                                     2.*atan2(1/2.*sqrt(4 - kx.^2 .* lambda.^2 - kz.^2.*lambda.^2),1/2.*sqrt(kx.^2+kz.^2).*lambda)
             w_   = @(kx,kz,lambda)  atan2d(...
                  real( +(kz.*kx.^2.*lambda + kz.^3.*lambda + kx.*sqrt(kx.^2+kz.^2).*sqrt(4-kx.^2.*lambda.^2-kz.^2.*lambda.^2))./(kx.^2+kz.^2) ), ...
                  real( -(kx.*kz.^2.*lambda + kx.^3.*lambda - kz.*sqrt(kx.^2+kz.^2).*sqrt(4-kx.^2.*lambda.^2-kz.^2.*lambda.^2))./(kx.^2+kz.^2) ));
@@ -1242,7 +1188,7 @@ classdef am_mbe
             % convert to reciprocal coordinates
             kx_ = @(w,th2,lambda) -2/(lambda).*sind(th2/2).*sind(th2/2-w);
             kz_ = @(w,th2,lambda)  2/(lambda).*sind(th2/2).*cosd(th2/2-w);
-            kx = kx_(w,th2,lambda); kz = kz_(w,th2,lambda);
+            kx  = kx_(w,th2,lambda); kz = kz_(w,th2,lambda);
         end
 
         function [kz]        = get_kz(th,hv)
