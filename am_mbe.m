@@ -1,7 +1,7 @@
 classdef am_mbe
 
     properties (Constant)
-        tiny      = 1E-4;          % precision of atomic coordinates
+        tiny      = 1E-6;          % precision of atomic coordinates
         r_0       = 2.81794032E-6; % [nm]       classical electron radius
         N_A       = 6.022141E23;   % [mol]      Avogadro's number
     end
@@ -193,38 +193,102 @@ classdef am_mbe
             th = [0:0.005:4].';
 
             % define material (species, stoichiometry [per f.u.], density)
-%             layer(1) = define_material({'Ge'},[1],5.323);
-%             layer(1) = define_material({'W'},[1],19.3);
-            layer(1) = define_material({'Ta','O'},[2,5],8.2);
-            layer(2) = define_material({'Si'},[1],2.53);
+            layer(1) = define_material({'Sr','Ti','O'},[1,1,3],4.81);
+            layer(2) = define_material({'Al','O'},[2,3],3.95);
 
             thickness = [50 1E3];
-            roughness = [1 1];
-            filling   = [1 1];
+            roughness = [1 2]*1;
+            filling   = [1.2 0.8];
 
             % get dielectric contributions
             nlayers = numel(layer);
             for i = 1:nlayers
-                layer(i).xray_refractive_index = get_xray_refractive_index( ...
-                    layer(i).Z,layer(i).atomic_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv,th);
+                xray_refractive_index(:,i) = get_xray_refractive_index( ...
+                    layer(i).Z, layer(i).atomic_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry), hv, th);
             end
 
             % simulate and analyze
             % x = [thickness,filling,roughness,I0,background]
             nlayers = numel(layer);
-            simulate_ = @(x,method) simulate_xrr(layer,th,hv,...
+            simulate_ = @(x,method) simulate_xrr(...
+                xray_refractive_index, th, hv,...
                 x(0*nlayers+[1:nlayers]),...
                 x(1*nlayers+[1:nlayers]),...
                 x(2*nlayers+[1:nlayers]),...
                 x(3*nlayers+1),method)*x(end-1)+x(end);
-            R_transfer = simulate_([thickness,filling,roughness,10,2,1E-3],1);
-            R_parratt  = simulate_([thickness,filling,roughness,10,2,1E-3],2);
+            R_transfer = simulate_([thickness,filling,roughness,10,2,6E-6],1);
+            R_parratt  = simulate_([thickness,filling,roughness,10,2,6E-6],2);
 
+            % load demo data
+            [demo_th,demo_I] = load_demo_data();
+            
             % exclude above noise floor
             ex_ = th<1.8; ex_ = th>0;
             analyze_xrr_with_fft(th(ex_),R_parratt(ex_),hv)
-            subplot(3,1,1); hold on; plot(th(ex_),R_transfer(ex_),'.r');
+            subplot(3,1,1); hold on; plot(th(ex_),R_transfer(ex_),'.r' ,demo_th,demo_I,'-k');
             fprintf('largest percentual difference between methods: %f %%\n',max(abs(R_parratt(ex_)-R_transfer(ex_))./R_parratt(ex_))*100)
+            
+            function [th,I] = load_demo_data()
+                data = [ ...
+                0.0000000E0,9.9602219E5; 2.5200001E1,9.9406744E5; 5.0400002E1,9.9211394E5; 7.5599998E1,9.9015906E5; 1.0080000E2,9.8820038E5; 1.2600000E2,9.8623506E5; 1.5120000E2,9.8426063E5;
+                1.7639999E2,9.8227419E5; 2.0160001E2,9.8027300E5; 2.2680000E2,9.7825406E5; 2.5200000E2,9.7621438E5; 2.7720001E2,9.7415069E5; 3.0239999E2,9.7205963E5; 3.2760001E2,9.6993744E5;
+                3.5279999E2,9.6778038E5; 3.7800000E2,9.6558419E5; 4.0320001E2,9.6334438E5; 4.2839999E2,9.6105600E5; 4.5360001E2,9.5871375E5; 4.7879999E2,9.5631163E5; 5.0400000E2,9.5384319E5;
+                5.2920001E2,9.5130113E5; 5.5440002E2,9.4867731E5; 5.7959998E2,9.4596256E5; 6.0479999E2,9.4314663E5; 6.3000000E2,9.4021763E5; 6.5520001E2,9.3716213E5; 6.8040002E2,9.3396450E5;
+                7.0559998E2,9.3060669E5; 7.3079999E2,9.2706731E5; 7.5600000E2,9.2332138E5; 7.8120001E2,9.1933869E5; 8.0640002E2,9.1508313E5; 8.3159998E2,9.1051038E5; 8.5679999E2,9.0556569E5;
+                8.8200000E2,9.0018038E5; 9.0720001E2,8.9426663E5; 9.3240002E2,8.8771000E5; 9.5759998E2,8.8035863E5; 9.8279999E2,8.7200469E5; 1.0080000E3,8.6235481E5; 1.0332000E3,8.5097900E5;
+                1.0584000E3,8.3721656E5; 1.0836000E3,8.1999081E5; 1.1088000E3,7.9741481E5; 1.1340000E3,7.6587288E5; 1.1592000E3,7.1770850E5; 1.1844000E3,6.3554994E5; 1.2096000E3,4.8724894E5;
+                1.2348000E3,3.0097491E5; 1.2600000E3,2.5470106E5; 1.2852000E3,2.5348736E5; 1.3104000E3,1.9355923E5; 1.3356000E3,1.1464320E5; 1.3608000E3,7.5343664E4; 1.3860000E3,8.2696367E4;
+                1.4112000E3,9.9931906E4; 1.4364000E3,1.0068584E5; 1.4616000E3,8.2588813E4; 1.4868000E3,5.6386391E4; 1.5120000E3,3.5250820E4; 1.5372000E3,2.6669520E4; 1.5624000E3,2.9223912E4;
+                1.5876000E3,3.6005441E4; 1.6128000E3,4.0376988E4; 1.6380000E3,3.9201746E4; 1.6632000E3,3.2974043E4; 1.6884000E3,2.4424703E4; 1.7136000E3,1.6769609E4; 1.7388000E3,1.2223693E4;
+                1.7640000E3,1.1256729E4; 1.7892000E3,1.2792750E4; 1.8144000E3,1.5053983E4; 1.8396000E3,1.6468977E4; 1.8648000E3,1.6221836E4; 1.8900000E3,1.4351235E4; 1.9152000E3,1.1520400E4;
+                1.9404000E3,8.6336299E3; 1.9656000E3,6.4587593E3; 1.9908000E3,5.3779624E3; 2.0160000E3,5.3290503E3; 2.0412000E3,5.9203696E3; 2.0663999E3,6.6381089E3; 2.0916001E3,7.0478950E3;
+                2.1168000E3,6.9214351E3; 2.1420000E3,6.2656250E3; 2.1672000E3,5.2697080E3; 2.1923999E3,4.2063125E3; 2.2176001E3,3.3267551E3; 2.2428000E3,2.7841042E3; 2.2680000E3,2.6027776E3;
+                2.2932000E3,2.6952451E3; 2.3183999E3,2.9109614E3; 2.3436001E3,3.0951553E3; 2.3688000E3,3.1368599E3; 2.3940000E3,2.9937263E3; 2.4192000E3,2.6911492E3; 2.4443999E3,2.3013840E3;
+                2.4696001E3,1.9128689E3; 2.4948000E3,1.6006639E3; 2.5200000E3,1.4064708E3; 2.5452000E3,1.3322922E3; 2.5703999E3,1.3470046E3; 2.5956001E3,1.4014202E3; 2.6208000E3,1.4457609E3;
+                2.6460000E3,1.4439822E3; 2.6712000E3,1.3814325E3; 2.6963999E3,1.2649659E3; 2.7216001E3,1.1169402E3; 2.7468000E3,9.6596021E2; 2.7720000E3,8.3758386E2; 2.7972000E3,7.4760431E2;
+                2.8223999E3,6.9931409E2; 2.8476001E3,6.8477631E2; 2.8728000E3,6.8900012E2; 2.8980000E3,6.9531244E2; 2.9232000E3,6.9020856E2; 2.9483999E3,6.6643958E2; 2.9736001E3,6.2381787E2;
+                2.9988000E3,5.6794720E2; 3.0240000E3,5.0761008E2; 3.0492000E3,4.5177130E2; 3.0743999E3,4.0708203E2; 3.0996001E3,3.7646732E2; 3.1248000E3,3.5897998E2; 3.1500000E3,3.5072623E2;
+                3.1752000E3,3.4641602E2; 3.2003999E3,3.4100558E2; 3.2256001E3,3.3097546E2; 3.2508000E3,3.1496945E2; 3.2760000E3,2.9374313E2; 3.3012000E3,2.6956308E2; 3.3263999E3,2.4531737E2;
+                3.3516001E3,2.2362614E2; 3.3768000E3,2.0618672E2; 3.4020000E3,1.9348260E2; 3.4272000E3,1.8486545E2; 3.4523999E3,1.7891942E2; 3.4776001E3,1.7395996E2; 3.5028000E3,1.6851141E2;
+                3.5280000E3,1.6164270E2; 3.5532000E3,1.5309998E2; 3.5783999E3,1.4323943E2; 3.6036001E3,1.3281506E2; 3.6288000E3,1.2270347E2; 3.6540000E3,1.1364841E2; 3.6792000E3,1.0608781E2;
+                3.7043999E3,1.0009192E2; 3.7296001E3,9.5408104E1; 3.7548000E3,9.1580368E1; 3.7800000E3,8.8098938E1; 3.8052000E3,8.4535820E1; 3.8303999E3,8.0634247E1; 3.8556001E3,7.6337799E1;
+                3.8808000E3,7.1763252E1; 3.9060000E3,6.7134674E1; 3.9312000E3,6.2702984E1; 3.9563999E3,5.8674198E1; 3.9816001E3,5.5162865E1; 4.0068000E3,5.2177746E1; 4.0320000E3,4.9637157E1;
+                4.0572000E3,4.7404339E1; 4.0823999E3,4.5330120E1; 4.1076001E3,4.3290573E1; 4.1327998E3,4.1211235E1; 4.1580000E3,3.9074284E1; 4.1832002E3,3.6910229E1; 4.2083999E3,3.4779194E1;
+                4.2336001E3,3.2748516E1; 4.2587998E3,3.0873001E1; 4.2840000E3,2.9182280E1; 4.3092002E3,2.7676987E1; 4.3343999E3,2.6333038E1; 4.3596001E3,2.5111279E1; 4.3847998E3,2.3969055E1;
+                4.4100000E3,2.2870434E1; 4.4352002E3,2.1792774E1; 4.4603999E3,2.0728746E1; 4.4856001E3,1.9684202E1; 4.5107998E3,1.8673252E1; 4.5360000E3,1.7712330E1; 4.5612002E3,1.6814917E1;
+                4.5863999E3,1.5988104E1; 4.6116001E3,1.5231474E1; 4.6367998E3,1.4538093E1; 4.6620000E3,1.3896948E1; 4.6872002E3,1.3295928E1; 4.7123999E3,1.2724496E1; 4.7376001E3,1.2175458E1;
+                4.7627998E3,1.1645569E1; 4.7880000E3,1.1135073E1; 4.8132002E3,1.0646506E1; 4.8383999E3,1.0183206E1; 4.8636001E3,9.7479525E0; 4.8887998E3,9.3420544E0; 4.9140000E3,8.9650078E0;
+                4.9392002E3,8.6146774E0; 4.9643999E3,8.2878704E0; 4.9896001E3,7.9810562E0; 5.0147998E3,7.6910324E0; 5.0400000E3,7.4153900E0; 5.0652002E3,7.1526937E0; 5.0903999E3,6.9024029E0;
+                5.1156001E3,6.6646032E0; 5.1407998E3,6.4396524E0; 5.1660000E3,6.2278514E0; 5.1912002E3,6.0292034E0; 5.2163999E3,5.8433146E0; 5.2416001E3,5.6694155E0; 5.2667998E3,5.5064821E0;
+                5.2920000E3,5.3534002E0; 5.3172002E3,5.2091208E0; 5.3423999E3,5.0727758E0; 5.3676001E3,4.9437304E0; 5.3927998E3,4.8215756E0; 5.4180000E3,4.7060695E0; 5.4432002E3,4.5970626E0;
+                5.4683999E3,4.4944181E0; 5.4936001E3,4.3979559E0; 5.5187998E3,4.3074198E0; 5.5440000E3,4.2224808E0; 5.5692002E3,4.1427555E0; 5.5943999E3,4.0678444E0; 5.6196001E3,3.9973626E0;
+                5.6447998E3,3.9309685E0; 5.6700000E3,3.8683770E0; 5.6952002E3,3.8093600E0; 5.7203999E3,3.7537365E0; 5.7456001E3,3.7013547E0; 5.7707998E3,3.6520772E0; 5.7960000E3,3.6057653E0;
+                5.8212002E3,3.5622721E0; 5.8463999E3,3.5214400E0; 5.8716001E3,3.4831052E0; 5.8967998E3,3.4471033E0; 5.9220000E3,3.4132755E0; 5.9472002E3,3.3814759E0; 5.9723999E3,3.3515732E0;
+                5.9976001E3,3.3234522E0; 6.0227998E3,3.2970114E0; 6.0480000E3,3.2721596E0; 6.0732002E3,3.2488127E0; 6.0983999E3,3.2268908E0; 6.1236001E3,3.2063153E0; 6.1487998E3,3.1870089E0;
+                6.1740000E3,3.1688948E0; 6.1992002E3,3.1518993E0; 6.2243999E3,3.1359518E0; 6.2496001E3,3.1209853E0; 6.2747998E3,3.1069388E0; 6.3000000E3,3.0937557E0; 6.3252002E3,3.0813847E0;
+                6.3503999E3,3.0697780E0; 6.3756001E3,3.0588911E0; 6.4007998E3,3.0486822E0; 6.4260000E3,3.0391119E0; 6.4512002E3,3.0301421E0; 6.4763999E3,3.0217359E0; 6.5016001E3,3.0138590E0;
+                6.5267998E3,3.0064785E0; 6.5520000E3,2.9995630E0; 6.5772002E3,2.9930837E0; 6.6023999E3,2.9870136E0; 6.6276001E3,2.9813275E0; 6.6527998E3,2.9760020E0; 6.6780000E3,2.9710147E0;
+                6.7032002E3,2.9663455E0; 6.7283999E3,2.9619749E0; 6.7536001E3,2.9578843E0; 6.7787998E3,2.9540565E0; 6.8040000E3,2.9504750E0; 6.8292002E3,2.9471245E0; 6.8543999E3,2.9439900E0;
+                6.8796001E3,2.9410584E0; 6.9047998E3,2.9383166E0; 6.9300000E3,2.9357526E0; 6.9552002E3,2.9333553E0; 6.9803999E3,2.9311144E0; 7.0056001E3,2.9290197E0; 7.0307998E3,2.9270620E0;
+                7.0560000E3,2.9252331E0; 7.0812002E3,2.9235241E0; 7.1063999E3,2.9219279E0; 7.1316001E3,2.9204371E0; 7.1567998E3,2.9190447E0; 7.1820000E3,2.9177449E0; 7.2072002E3,2.9165311E0;
+                7.2323999E3,2.9153981E0; 7.2576001E3,2.9143407E0; 7.2827998E3,2.9133539E0; 7.3080000E3,2.9124331E0; 7.3332002E3,2.9115741E0; 7.3583999E3,2.9107728E0; 7.3836001E3,2.9100256E0;
+                7.4087998E3,2.9093287E0; 7.4340000E3,2.9086790E0; 7.4592002E3,2.9080734E0; 7.4843999E3,2.9075089E0; 7.5096001E3,2.9069827E0; 7.5347998E3,2.9064925E0; 7.5600000E3,2.9060359E0;
+                7.5852002E3,2.9056103E0; 7.6103999E3,2.9052141E0; 7.6356001E3,2.9048452E0; 7.6607998E3,2.9045017E0; 7.6860000E3,2.9041817E0; 7.7112002E3,2.9038839E0; 7.7363999E3,2.9036069E0;
+                7.7616001E3,2.9033492E0; 7.7867998E3,2.9031093E0; 7.8120000E3,2.9028862E0; 7.8372002E3,2.9026785E0; 7.8623999E3,2.9024856E0; 7.8876001E3,2.9023061E0; 7.9127998E3,2.9021392E0;
+                7.9380000E3,2.9019842E0; 7.9632002E3,2.9018400E0; 7.9883999E3,2.9017062E0; 8.0136001E3,2.9015818E0; 8.0387998E3,2.9014661E0; 8.0640000E3,2.9013588E0; 8.0892002E3,2.9012592E0;
+                8.1143999E3,2.9011667E0; 8.1396001E3,2.9010806E0; 8.1647998E3,2.9010010E0; 8.1900000E3,2.9009268E0; 8.2152002E3,2.9008582E0; 8.2404004E3,2.9007945E0; 8.2655996E3,2.9007354E0;
+                8.2907998E3,2.9006805E0; 8.3160000E3,2.9006298E0; 8.3412002E3,2.9005826E0; 8.3664004E3,2.9005389E0; 8.3915996E3,2.9004984E0; 8.4167998E3,2.9004610E0; 8.4420000E3,2.9004261E0;
+                8.4672002E3,2.9003940E0; 8.4924004E3,2.9003642E0; 8.5175996E3,2.9003365E0; 8.5427998E3,2.9003110E0; 8.5680000E3,2.9002872E0; 8.5932002E3,2.9002652E0; 8.6184004E3,2.9002450E0;
+                8.6435996E3,2.9002264E0; 8.6687998E3,2.9002090E0; 8.6940000E3,2.9001927E0; 8.7192002E3,2.9001780E0; 8.7444004E3,2.9001641E0; 8.7695996E3,2.9001515E0; 8.7947998E3,2.9001398E0;
+                8.8200000E3,2.9001288E0; 8.8452002E3,2.9001188E0; 8.8704004E3,2.9001095E0; 8.8955996E3,2.9001009E0; 8.9207998E3,2.9000931E0; 8.9460000E3,2.9000859E0; 8.9712002E3,2.9000790E0;
+                8.9964004E3,2.9000728E0; 9.0215996E3,2.9000671E0; 9.0467998E3,2.9000618E0; 9.0720000E3,2.9000568E0; 9.0972002E3,2.9000523E0; 9.1224004E3,2.9000483E0; 9.1475996E3,2.9000444E0;
+                9.1727998E3,2.9000409E0; 9.1980000E3,2.9000375E0; 9.2232002E3,2.9000347E0; 9.2484004E3,2.9000318E0; 9.2735996E3,2.9000292E0; 9.2987998E3,2.9000268E0; 9.3240000E3,2.9000247E0;
+                9.3492002E3,2.9000227E0; 9.3744004E3,2.9000208E0; 9.3995996E3,2.9000192E0; 9.4247998E3,2.9000175E0; 9.4500000E3,2.9000161E0; 9.4752002E3,2.9000149E0; 9.5004004E3,2.9000137E0;
+                9.5255996E3,2.9000125E0; 9.5507998E3,2.9000115E0; 9.5760000E3,2.9000106E0; 9.6012002E3,2.9000096E0; 9.6264004E3,2.9000089E0; 9.6515996E3,2.9000082E0; 9.6767998E3,2.9000075E0;
+                9.7020000E3,2.9000068E0; 9.7272002E3,2.9000063E0; 9.7524004E3,2.9000058E0; 9.7775996E3,2.9000053E0; 9.8027998E3,2.9000049E0; 9.8280000E3,2.9000044E0; 9.8532002E3,2.9000041E0;
+                9.8784004E3,2.9000037E0; 9.9035996E3,2.9000034E0; 9.9287998E3,2.9000032E0; 9.9540000E3,2.9000030E0; 9.9792002E3,2.9000027E0; 1.0004400E4,2.9000025E0];
+                th = data(:,1)/3600; I = data(:,2)./max(data(:,2)); 
+            end
         end
  
         function           demo_plot_rsm()
@@ -256,6 +320,39 @@ classdef am_mbe
             % hk= kx * 0.4212/norm([0 0 3]);
             % l = kz * 0.4212/norm([1 1 0]);
             % contourf(hk,l,log(d.data));
+        end
+        
+        function           demo_plot_xrr_diffuse()
+            clear;clc;import am_mbe.* am_dft.* am_lib.*
+            cd('/Users/lenzinho/My Documents/Academic/Cornell/Research/XRD/ABM171001-15');
+            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
+            lambda = get_photon_wavelength(hv);
+            d = xrdmlread('ABM171001-15_diffuse.xrdml');
+
+            data= d.data;
+            th2 = d.Theta2;
+            w   = d.Omega;
+
+            % smooth
+            % N   = 10; alpha = 5;
+            % g   = gaussw_(N,alpha).*gaussw_(N,alpha).';
+            % data= conv2(log(data+min(data(data(:)>0))),g,'same');
+            data(d.data==0)=min(data(data(:)~=0));
+            data = log(data); 
+
+            % convert to angular units
+            kz_ = @(w,th2,lambda)  2/(lambda).*sind(th2/2).*cosd(th2/2-w);
+            kx_ = @(w,th2,lambda) -2/(lambda).*sind(th2/2).*sind(th2/2-w);
+            kz = kz_(w,th2,lambda); kx = kx_(w,th2,lambda);
+
+            figure(1); set(gcf,'color','w');
+            surf(kx,kz,data,'edgecolor','none');
+            % contourf(kx,kz,data,500,'edgecolor','none','linewidth',0.01);
+            % daspect([1 1 1]);
+            % colormap(parula(100));view([0 0 1]);
+
+            caxis([5 11])
+            colormap(color_(100,'magma'))
         end
         
         function           demo_w2th_fit()
@@ -330,12 +427,12 @@ classdef am_mbe
         
         % XRR
         
-        function           analyze_xrr_with_fft(th,intensity,hv,thc)
+        function           analyze_xrr_with_fft(th,I,hv,thc)
             %
-            % beta = analyze_xrr_with_fft(th,xrr,hv,thc)
+            % beta = analyze_xrr_with_fft(th,I,hv,thc)
             % 
             % th         [deg]          incident x-ray angle
-            % xintensity [a.u.]         xrr intensity
+            % I          [a.u.]         xrr intensity
             % hv         [eV]           photon energy
             % thc        [deg]          (optional) critical angle
             %
@@ -350,38 +447,40 @@ classdef am_mbe
             if nargin < 4 || isempty(thc)
                 qc = [];
             else
-                qc = get_qz(thc,hv);
+                qc = get_kz(thc,hv);
             end
 
-            % fft analysis
-            F = intensity(:);
             % get wavevector
-            qz = get_qz(th,hv);
+            qz = get_kz(th,hv);
             % subtract critical wavevector
-            if isempty(qc); [~,c]=max(-diff(F)./diff(th)); qc = qz(c); end
-            q = sqrt(qz.^2 - qc.^2); Fq=F(q>0); q=q(q>0); nqs = numel(q);
+            if isempty(qc); [~,c]=max(-diff(I)./diff(th)); qc = qz(c); end
+            q = sqrt(qz.^2 - qc.^2); Fq=I(q>0); q=q(q>0); nqs = numel(q);
             % resample Fq,q on equidistant intervals
             qe = linspace(min(q),max(q),nqs).'; Fq = interp1(q,Fq,qe); q = qe; 
             % apply background correction
             Fq = (Fq.*q.^4-mean(Fq.*q.^4)) .* tukeyw_(nqs,0.90);
             % evalute DFT
             x  = [0:0.5:200]; 
-            K  = exp(-1i*x(:).*q(:).');
+            K  = exp(-2i*pi*x(:).*q(:).');
             Fx = K*Fq(:);
             % evaluate FFT
             nxs=2^10;
-            x_fft = [0:nxs-1]/(nxs)/(q(2)-q(1))*pi*2; x_fft = x_fft([1:floor(nxs/2)]);
-            F_fft = fft(Fq,2^10);                     F_fft = F_fft([1:floor(nxs/2)]);
+            x_fft = [0:nxs-1]/(nxs)/(q(2)-q(1)); x_fft = x_fft([1:floor(nxs/2)]); 
+            F_fft = fft(Fq,2^10);                F_fft = F_fft([1:floor(nxs/2)]);
+            % IMPROVISED CORRECTION
+            % IMPROVISED CORRECTION
+                x_fft = x_fft/2;
+                x = x/2;
+            % IMPROVISED CORRECTION
+            % IMPROVISED CORRECTION            
             % plot th, Fx, and Fq
-            subplot(3,1,1); semilogy(th, F); xlabel('\theta [deg]'); ylabel('Intensity [a.u.]'); axis tight;
+            subplot(3,1,1); semilogy(th, I); xlabel('\theta [deg]'); ylabel('Intensity [a.u.]'); axis tight;
             subplot(3,1,2); plot(q, Fq); xlabel('(q^2 - q_c^2)^{1/2} [1/nm]'); ylabel('Intensity [a.u.]'); axis tight;
-            subplot(3,1,3); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200])
-
+            subplot(3,1,3); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200]);
         end
 
         function [x]     = analyze_xrr_with_fit(th,intensity,hv,layer,x0,ub,lb,isfixed,domain)
-            import am_mbe.*
-            import am_lib.*
+            import am_mbe.* am_lib.*
             
             % if window is defined, crop and filter
             if nargin > 8
@@ -392,12 +491,13 @@ classdef am_mbe
             % get dielectric contributions
             nlayers = numel(layer);
             for i = 1:nlayers
-                layer(i).xray_refractive_index = get_xray_refractive_index( ...
+                xray_refractive_index(:,i) = get_xray_refractive_index( ...
                     layer(i).Z,layer(i).atomic_density.*layer(i).stoichiometry/sum(layer(i).stoichiometry),hv,th);
             end
             % x = [thickness,filling,roughness,I0,background]
             nlayers = numel(layer);
-            simulate_ = @(x) simulate_xrr(layer,th,hv,...
+            simulate_ = @(x) simulate_xrr(...
+                xray_refractive_index, th, hv,...
                 x(0*nlayers+[1:nlayers]),...
                 x(1*nlayers+[1:nlayers]),...
                 x(2*nlayers+[1:nlayers]),...
@@ -509,14 +609,11 @@ classdef am_mbe
             end
         end
         
-        function [intensity] = simulate_xrr(layer,th,hv,thickness,filling,roughness,sample_length,method)
+        function I = simulate_xrr(eta,th,hv,thickness,filling,roughness,sample_length,algo)
             %
             % R = simulate_xray_reflectivity(layer,th,hv,thickness,filling,roughness)
             % 
-            % layers [struct]           layers
-            %    layer(i).mass_density      [g/cm^3]        mass density
-            %    layer(i).Z                 [Z]             atomic species
-            %    layer(i).stoichiometry     [atoms/u.c.]    number of atoms per formula unit
+            % eta       [unit-less]     x-ray refractive index
             % th        [deg]           angles
             % thickness [nm]            thickness
             % filling   [unitless]      multiplies density
@@ -525,25 +622,30 @@ classdef am_mbe
             
             import am_mbe.*
             
-            if nargin < 8; method = 2; end
+            if nargin < 8; algo = 2; end
             if nargin < 7; sample_length = []; end
+            if size(th,2)>size(th,1); th=th.'; end
+            
+            % get number of layers and number of angles
+            nlayers = numel(thickness); nths = numel(th); kz = zeros(nths,nlayers);
+            
+            % get photon wavelength
+            lambda  = get_photon_wavelength(hv);
+            
+            % get kx and kz
+            % Note: k are incident wavevectors and not diffraction vectors
+            get_kz = @(th,lambda) sind(th)./lambda;
+            get_kx = @(th,lambda) cosd(th)./lambda;
 
-            switch method
-                case 1 % explicit transfer matrix (slower)                    
-                    % get kx and kz
-                    % Note: k are incident wavevectors and not diffraction vectors
-                    lambda = get_photon_wavelength(hv);
-                    get_kz = @(th,hv) 2*pi/lambda*sind(th);
-                    get_kx = @(th,hv) 2*pi/lambda*cosd(th);
-
+            switch algo
+                case 1 % explicit transfer matrix (slower)
                     % [nths,nlayers] solve wavevector boundary conditions to get
                     % out-of-plane wavevector component in layer kz [nths,nlayers]
                     % 1. k2  = (n2/n1) k1  is  snell's law
-                    % 2. k1x = k2x        
-                    nlayers = numel(layer); nths = numel(th); kz = zeros(nths,nlayers);
+                    % 2. k1x = k2x
                     get_kz_in_layer = @(n1,n2,k1z,k1x) sqrt( (n2./n1).^2 .* k1z.^2 + ((n2./n1).^2-1) .* k1x.^2 );
                     for i = 1:nlayers
-                        kz(:,i) = get_kz_in_layer(1,filling(i)*(layer(i).xray_refractive_index(:)-1)+1,get_kz(th,hv),get_kx(th,hv));
+                        kz(:,i) = get_kz_in_layer(1,filling(i).*(eta(:,i)-1)+1,get_kz(th,lambda),get_kx(th,lambda));
                     end
 
                     % get transfer matricies R and T which describe propagation
@@ -565,21 +667,21 @@ classdef am_mbe
                     %       [ exp(1i*( - k1 + k2 )) * (k1 + k2), exp(1i*( - k1 - k2 ))*(k1 - k2)]
                     %       [ exp(1i*( + k1 + k2 )) * (k1 - k2), exp(1i*( + k1 - k2 ))*(k1 + k2)] ] ./ (2*k1)];
                     % to add roughness, see below.
-                    
                     % hmm .. these two methods seem to be equivalent (when sigma == 1 and z == 1)? as they should be. 
+
                     get_transfer_matrix_at_interface = @(k1,k2,sigma) [ ...
-                        [ (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1), (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1)]
-                        [ (exp(-(k1 + k2).^2*sigma.^2/2) * (k1 - k2))/(2*k1), (exp(-(k1 - k2).^2*sigma.^2/2) * (k1 + k2))/(2*k1)] ];
+                        [ (exp(-(k1 - k2).^2*(sigma*2*pi).^2/2) * (k1 + k2))/(2*k1), (exp(-(k1 + k2).^2*(sigma*2*pi).^2/2) * (k1 - k2))/(2*k1)]
+                        [ (exp(-(k1 + k2).^2*(sigma*2*pi).^2/2) * (k1 - k2))/(2*k1), (exp(-(k1 - k2).^2*(sigma*2*pi).^2/2) * (k1 + k2))/(2*k1)] ];
 
                     get_transfer_matrix_in_medium = @(k,l) [ ...
-                            [ exp(-1i*k*l), 0]
-                            [ 0, exp(+1i*k*l)]];
+                            [ exp(-2i.*pi.*k.*l), 0]
+                            [ 0, exp(+2i.*pi.*k.*l)]];
 
                     % get reflection at each theta value
-                    intensity = zeros(1,nths);
+                    I = zeros(nths,1);
                     for j = 1:nths
                         % vacuum/first layer
-                        M =     get_transfer_matrix_at_interface(get_kz(th(j),hv)    , kz(j,1), roughness(1) );
+                        M =     get_transfer_matrix_at_interface(get_kz(th(j),lambda), kz(j,1), roughness(1) );
                         M = M * get_transfer_matrix_in_medium(                         kz(j,1), thickness(1) );
                         % first layer ... nth layer
                         if nlayers > 1
@@ -588,57 +690,40 @@ classdef am_mbe
                                 M = M * get_transfer_matrix_in_medium(                 kz(j,i), thickness(i) );
                             end
                         end
-                        intensity(j) = abs(M(2,1)./M(1,1)).^2;
+                        I(j) = abs(M(2,1)./M(1,1)).^2;
                     end
-                    
-                    th=th(:).';
-                    intensity=intensity(:).';
-                    
                 case 2 % recursive Parratt method without transfer matrix (faster)
-                    % number of layers
-                    nlayers = numel(layer);
-                    lambda = get_photon_wavelength(hv);
-                    th2kz = @(th,lambda) 4*pi/lambda .* sind(th(:));
+                    thickness = thickness*2;
+                    roughness = roughness*4*pi;
+                    % initialize matrices
+                    r = zeros(nths,nlayers); R = zeros(nths,nlayers-1);
                     %----- Wavevector transfer in each layer
-                    nths = numel(th); Q = zeros(nlayers,nths);
-                    Q(1,:) = th2kz(th,lambda);
+                    kz(:,1) = get_kz(th,lambda);
                     for j=1:nlayers
-                        Q(j+1,:)= sqrt(Q(1,:).^2 + 2*(4*pi/lambda).^2 * (layer(j).xray_refractive_index(:).'-1) * filling(j) );
+                        kz(:,j+1)= sqrt(kz(:,1).^2 + 2*(1/lambda).^2 * (eta(:,j)-1) * filling(j) );
                     end
                     %----- Reflection coefficients (no multiple scattering)
-                    r = zeros(nlayers,nths);
                     for j=1:nlayers
-                        r(j,:)=(  (Q(j,:)-Q(j+1,:))./(Q(j,:)+Q(j+1,:)) ) .* exp(-0.5*(Q(j,:).*Q(j+1,:))*roughness(j)^2);
+                        r(:,j)=(  (kz(:,j)-kz(:,j+1))./(kz(:,j)+kz(:,j+1)) ) .* exp(-0.5*(kz(:,j).*kz(:,j+1))*roughness(j)^2);
                     end
                     %----- Reflectivity
-                    R = zeros(nlayers-1,nths);
                     if nlayers>1
-                        R(1,:) =  (r(nlayers-1,:)  + r(nlayers,:) .* exp(1i*Q(nlayers,:)*thickness(nlayers-1)) ) ...
-                              ./(1+r(nlayers-1,:) .* r(nlayers,:) .* exp(1i*Q(nlayers,:)*thickness(nlayers-1)) );
+                        R(:,1) =  (r(:,nlayers-1)  + r(:,nlayers) .* exp(2i*pi*kz(:,nlayers)*thickness(nlayers-1)) ) ...
+                              ./(1+r(:,nlayers-1) .* r(:,nlayers) .* exp(2i*pi*kz(:,nlayers)*thickness(nlayers-1)) );
                     end
-                    if nlayers>2
-                    for j=2:nlayers-1
-                        R(j,:) =  (r(nlayers-j,:)  + R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*thickness(nlayers-j)) ) ...
-                              ./(1+r(nlayers-j,:) .* R(j-1,:) .* exp(1i*Q(nlayers-j+1,:)*thickness(nlayers-j)) );
-                    end
-                    end
+                    if nlayers>2; for j=2:nlayers-1
+                        R(:,j) =  (r(:,nlayers-j)  + R(:,j-1) .* exp(2i*pi*kz(:,nlayers-j+1)*thickness(nlayers-j)) ) ...
+                              ./(1+r(:,nlayers-j) .* R(:,j-1) .* exp(2i*pi*kz(:,nlayers-j+1)*thickness(nlayers-j)) );
+                    end; end
                     %------ Intensity reflectivity
-                    if nlayers==1
-                        intensity = abs(r(1,:)).^2;
-                    else
-                        intensity = abs(R(nlayers-1,:)).^2;
-                    end
-                    
-                    th=th(:).';
-                    intensity=intensity(:).';
-                    
+                    if nlayers==1; I = abs(r(:,1)).^2; else; I = abs(R(:,nlayers-1)).^2; end
             end
             
             % add intensity correction due to finite sample width
             if ~isempty(sample_length)
                 xray_beam_height = 0.1; % [mm] height of x-ray beam
                 th_b = asind(xray_beam_height/sample_length);
-                intensity(th<th_b) = sind(th(th<th_b)) ./ sind(th_b) .* intensity(th<th_b);
+                I(th<th_b) = sind(th(th<th_b)) ./ sind(th_b) .* I(th<th_b);
             end
         end
 
@@ -663,7 +748,7 @@ classdef am_mbe
             import am_mbe.*
             
             % resample intensity and q on equidistant intervals
-            q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
+            q = get_kz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; Fq = interp1(q,intensity,qe); q = qe; th2 = get_th(q,hv)*2;
             % if window is defined, crop and filter
             if nargin > 3; if ~isempty(domain)
                 ex_ = and( th2 < max(domain) , th2 > min(domain) );
@@ -671,12 +756,12 @@ classdef am_mbe
             end; end
             % evalute DFT
             x  = [0:0.5:200]; 
-            K  = exp(-1i*x(:).*q(:).');
+            K  = exp(-2i*pi*x(:).*q(:).');
             Fx = K*Fq(:);
             % evaluate FFT
             nxs=2^10;
-            x_fft = [0:nxs-1]/(nxs)/(q(2)-q(1))*pi*2; x_fft = x_fft([1:floor(nxs/2)]);
-            F_fft = fft(Fq,2^10);                     F_fft = F_fft([1:floor(nxs/2)]);
+            x_fft = [0:nxs-1]/(nxs)/(q(2)-q(1)); x_fft = x_fft([1:floor(nxs/2)]);
+            F_fft = fft(Fq,2^10);                F_fft = F_fft([1:floor(nxs/2)]);
             % plot th, Fx, and Fq
             subplot(2,1,1); semilogy(th2,Fq,'-'); xlabel('2\theta [deg]'); ylabel('Intensity [a.u.]'); axis tight;
             subplot(2,1,2); semilogy(x, abs(Fx).^2,'-', x_fft, abs(F_fft).^2,'.'); xlabel('x [nm]'); ylabel('|FFT|^2 [a.u.]'); axis tight; xlim([0 200]);
@@ -703,7 +788,7 @@ classdef am_mbe
             end
             
             % resample intensity and q on equidistant intervals
-            q = get_qz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; 
+            q = get_kz(th2(:)/2,hv); qe = linspace(min(q),max(q),numel(q)).'; 
             intensity = interp1(q,intensity,qe); intensity(intensity==0)=min(intensity(intensity~=0));
             q = qe; th2 = 2*get_th(q,hv);
             
@@ -969,55 +1054,58 @@ classdef am_mbe
             Fhkl = sum(f0(i,:).*exp(2i*pi*(uc.bas*0.1*uc.tau).'*k),1); 
         end
         
-        function [bragg] = get_bragg(uc)
-           import am_mbe.* am_lib.* am_dft.*
+        function [bbz,iiz] = get_bbz(uc,hv,threshold)
+            % bragg brillouin zone
+            import am_mbe.* am_lib.* am_dft.*
+            
+            if nargin < 2; hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1'); end
+            if nargin < 3; threshold = am_mbe.tiny; end
            
+            fprintf(' ... getting diffraction intensities'); tic
+            
             % generate hkl list
-            hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1'); lambda = get_photon_energy(hv);
+            lambda = get_photon_energy(hv);
             % get miller indicies [hkl] excluding gamma
-            N=6; hkl=permn_([N:-1:-N],3).'; hkl=hkl(:,~all(hkl==0,1)); 
+            N=6; k=permn_([N:-1:-N],3).'; k=k(:,~all(k==0,1));
             % get reciprocal basis vectors [1/nm]
             recbas = inv(uc.bas*0.1).';
             % covert to cart [1/nm] and sort by distances
-            k=recbas*hkl; [~,i]=sort(normc_(k)); k=k(:,i); hkl=hkl(:,i);
+            [~,i]=sort(normc_(recbas*k)); k=k(:,i);
             % identify values which cannot be reached by diffractometer
-            th2_max=180; ex_=lambda*normc_(k)/2<sind(th2_max/2); k=k(:,ex_); hkl=hkl(:,ex_);
-            
-            % get 2th value
-            th2 = 2*asind(lambda*normc_(k)/2);
-            
-            % find unique hkls
-                % get point symmetries
-                [~,~,~,R] = get_symmetries(uc);                    
-                % check that inversion is present, if not add it due to time reversal
-                if ~any(abs(sum(reshape(R,9,[])+reshape(eye(3),9,1),1))<am_lib.eps)
-                    nRs = size(R,3); R(:,:,nRs+[1:nRs]) = -R(:,:,[1:nRs]);
-                end
-                % define function to apply symmetries to position vectors
-                sym_apply_ = @(R,tau) reshape(matmul_(R(1:3,1:3,:),tau),3,[],size(R,3));
-                % convert point symmetries [frac -> recp-cart]
-                R = matmul_(matmul_(recbas,permute(R,[2,1,3])),inv(recbas));
-                % get permutation matrix and construct a sparse binary representation 
-                PM = member_(sym_apply_(R,k),k,1E-5); A = get_connectivity(PM);
-                % get irreducible k-points
-                i2p = round(findrow_(A)).'; %p2i = round(([1:size(A,1)]*A));
-                % record irreducible kponts and multiplicity
-                k = k(:,i2p); hkl=hkl(:,i2p); m = sum(A,2).';
-            
+            th2_max=180; ex_ = lambda*normc_(recbas*k)/2 < sind(th2_max/2); k=k(:,ex_);
             % get structure factors
-            [Fhkl]  = get_structure_factor(uc,k,hv); Fhkl2= abs(Fhkl).^2; Fhkl2 = Fhkl2./max(Fhkl2)*100;
-            
+            Fk = get_structure_factor(uc,recbas*k,hv);
+            % exclude reflections with diffraction intensities below the value
+            Fk2= abs(Fk).^2; Fk2 = Fk2./max(Fk2)*100; ex_ = Fk2>threshold;
             % save structure
-            bragg.th2=th2;
-            bragg.hkl=hkl;
-            bragg.k=k;
-            bragg.m=m;
-            bragg.Fhkl2=Fhkl2;
-            bragg.Fhkl=Fhkl;
-            bragg.isaccessible=ex_;
+            bb_ = @(hv,recbas,k,Fk2) struct('units','frac-recp',...
+                'hv',hv,'recbas',recbas,'nks',size(k,2),'k',k,'w',ones(1,size(k,2)),'Fk2',Fk2);
+            bb = bb_(hv,recbas,k(:,ex_),Fk2(ex_));
+            
+            % get symmetrically equivalent brag spots
+            [iiz,i2b,b2i] = get_ibz(bb,uc,'nomod');
+            iiz.i2b = i2b; iiz.b2i = b2i; iiz.Fk2 = iiz.Fk2(i2b);
+            bbz.i2b = i2b; bbz.b2i = b2i; 
+            
+            % print stuff
+            fprintf(' (%.3f s) \n',toc);
+            tabulate_bragg(iiz,hv,threshold)
+            
+            function           tabulate_bragg(iiz,hv,threshold)
+                fprintf('     %5s %5s %5s %10s %5s %10s\n','h','k','l','2th [deg]','w','Fhkl^2 [%]');
+                fprintf('     %5s %5s %5s %10s %5s %10s\n','-----','-----','-----','----------','-----','----------');
+                for j = 1:iiz.nks
+                    % exclude everything with peak height smaller than threshold
+                    if abs(iiz.Fk2(j))>threshold
+                        th2 = 2*am_mbe.get_th(norm(iiz.recbas*iiz.k(:,j)),hv);
+                        fprintf('     %5i %5i %5i %10.3f %5i %10.3f\n',iiz.k(:,j),th2,iiz.w(j),iiz.Fk2(j));
+                    end
+                end
+            end
         end
+        
 
-        function [h]     = plot_bragg(bragg)
+        function [h]     = plot_bragg_angles_vs_2theta(bragg)
             import am_lib.* am_dft.*
             
             % number of bragg structures (one for each cell)
@@ -1049,21 +1137,40 @@ classdef am_mbe
             end
         end
         
-        function           tablulate_bragg(bragg,threshold)
-            % exclude everything with peak height smaller than threshold
-            ex_=bragg.Fhkl2>threshold; Fhkl2=bragg.Fhkl2(ex_); Fhkl=bragg.Fhkl(ex_); th2=bragg.th2(ex_); 
-            hkl=bragg.hkl(:,ex_); k=bragg.k(:,ex_); m=bragg.m(ex_);
-            %  print table
-            nks = numel(m);
-            fprintf('%5s %5s %5s %10s %5s %10s\n','h','k','l','2th [deg]','m','Fhkl^2 [%]');
-            fprintf('%5s %5s %5s %10s %5s %10s\n','-----','-----','-----','----------','-----','----------');
-            for i = 1:nks
-                fprintf('%5i %5i %5i %10.3f %5i %10.3f\n',hkl(:,i),th2(:,i),m(i),Fhkl2(i));
+        function [h]     = plot_bragg_poly_rings(bragg,varargin)
+            % [uc,~,~]=get_cell('material','SrTiO3');
+            % [bragg] = get_bragg_poly_rings(uc,hv);
+            % [h]     = plot_bragg_poly_rings(bragg,'linewidth',1.5);
+            import am_mbe.*
+            % include edge points 
+            N = 201; euler = exp(2i*pi*[0:N]/N);
+            x = real(euler);y = imag(euler); h=hggroup;
+            for i = 1:bragg.nks
+                r = norm(bragg.k(:,i));
+                line(r*x,r*y,'color','r',varargin{:},'Parent',h)
+                text(0,r,sprintf('%i %i %i',bragg.hkl(:,i)),'HorizontalAlignment','center','BackgroundColor','w','EdgeColor','r','Parent',h,varargin{:});
             end
         end
         
-        
-        % planar diffraction
+        function [h]     = plot_bragg_spots(bragg,v1,v2,varargin)
+            % see which points lie on the plane
+            for i = 1:size(bragg.hkl,2)
+                if eq_(det([v1(:),v2(:),bragg.hkl(:,i)]),0)
+                    ex_(i) = true;
+                else
+                    ex_(i) = false;
+                end
+            end
+            % exclude points not on the line
+            bragg.k = bragg.k(:,ex_); bragg.hkl = bragg.hkl(:,ex_);
+            bragg.x = v1*bragg.k; bragg.y = v2*bragg.k; bragg.Fhkl2 = bragg.Fhkl2(ex_);
+            % plot points
+            h=hggroup;
+            hold on; scatter(bragg.x,bragg.y,bragg.Fhkl2,'filled','linewidth',2,varargin{:},'Parent',h); hold off;
+            for i = 1:numel(bragg.x)
+                text(bragg.x(i),bragg.y(i)+0.5,sprintf('%i %i %i',bragg.hkl(:,i)),'HorizontalAlignment','center','BackgroundColor','w','EdgeColor','b');
+            end
+        end
         
     end
     
@@ -1074,14 +1181,23 @@ classdef am_mbe
         function [varargout] = kxkz2angle(kx,kz,hv,flag)
             % [alpha_i,alpha_f] = kxkz2angle(kx,kz,hv,'in/exit')
             % [   w   ,  th2  ] = kxkz2angle(kx,kz,hv,'w2th')
+            %
+            % test 
+            % kx = rand(1)*10;
+            % kz = rand(1)*10;
+            % [w,th2] = kxkz2angle(kx,kz,hv,'w2th')
+            % [kxp,kzp]     = angle2kxkz(w,th2,hv)
+            % kx-kxp 
+            % kz-kzp
             
             import am_mbe.*
             
             lambda = get_photon_energy(hv);
             
             th2_ = @(kx,kz,lambda) 2.*atan2d(...
-                 real(sqrt(     kx.^2 + kz.^2).*lambda),...
-                 real(sqrt(4 - (kx.^2 + kz.^2).*lambda.^2)));
+                 real(sqrt(    (kx.^2 + kz.^2).*lambda.^2 )),...
+                 real(sqrt(4 - (kx.^2 + kz.^2).*lambda.^2 )));
+%                                     2.*atan2(1/2.*sqrt(4 - kx.^2 .* lambda.^2 - kz.^2.*lambda.^2),1/2.*sqrt(kx.^2+kz.^2).*lambda)
             w_   = @(kx,kz,lambda)  atan2d(...
                  real( +(kz.*kx.^2.*lambda + kz.^3.*lambda + kx.*sqrt(kx.^2+kz.^2).*sqrt(4-kx.^2.*lambda.^2-kz.^2.*lambda.^2))./(kx.^2+kz.^2) ), ...
                  real( -(kx.*kz.^2.*lambda + kx.^3.*lambda - kz.*sqrt(kx.^2+kz.^2).*sqrt(4-kx.^2.*lambda.^2-kz.^2.*lambda.^2))./(kx.^2+kz.^2) ));
@@ -1096,6 +1212,11 @@ classdef am_mbe
                 case 'w2th'
                     varargout{1} =   w_(kx,kz,lambda);
                     varargout{2} = th2_(kx,kz,lambda);
+                case 'test'
+                    kx = rand(1)*10; kz = rand(1)*10;
+                    [w,th2] = kxkz2angle(kx,kz,hv,'w2th');
+                    [kxp,kzp] = angle2kxkz(w,th2,hv);
+                    fprintf('%f \t %f\n',kx-kxp, kz-kzp)
             end
         end
         
@@ -1112,21 +1233,19 @@ classdef am_mbe
             kx = kx_(w,th2,lambda); kz = kz_(w,th2,lambda);
         end
 
-        % NOTE: INCONSISTENT DEFINITIONS. REMOVE 4 PI FACTOR.
-        
-        function [qz]        = get_qz(th,hv)
+        function [kz]        = get_kz(th,hv)
             
             import am_mbe.*
             
-            qz = 4*pi./get_photon_wavelength(hv) .* sind(th);
+            kz = sind(th)/get_photon_wavelength(hv);
             
         end
 
-        function [th]        = get_th(qz,hv)
+        function [th]        = get_th(kz,hv)
             
             import am_mbe.*
             
-            th = asind( get_photon_wavelength(hv)*qz/(4*pi) );
+            th = asind(get_photon_wavelength(hv)*kz/2);
             
         end
           
