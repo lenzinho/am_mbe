@@ -327,11 +327,11 @@ classdef am_mbe
             hv = get_atomic_emission_line_energy(get_atomic_number('Cu'),'kalpha1');
             
             hold on; plot_xrd_diffraction_plane_accessible(hv); hold off;
-            
+
             [uc,~,~]=get_cell('material','SrTiO3');
-            [bbz,iiz] = get_bbz(uc,hv);
-            h = plot_iiz_2D(iiz,'linewidth',1);
-            h = plot_bbz_2D(bbz,[0 0 1],[1 1 0],'linewidth',2);
+            [fbs,ibs] = get_bragg(uc,hv);
+            h = plot_ibs_2D(ibs,'linewidth',1);
+            h = plot_fbs_2D(fbs,[0 0 1],[1 1 0],'linewidth',2);
         end
         
         function           demo_plot_xrr_diffuse()
@@ -1016,7 +1016,7 @@ classdef am_mbe
             Fk = sum(f0(i,:).*exp(2i*pi*(uc.bas*0.1*uc.tau).'*k),1); 
         end
 
-        function [bbz,iiz] = get_bbz(uc,hv,threshold)
+        function [fbs,ibs] = get_bragg(uc,hv,threshold)
             % bragg brillouin zone
             import am_mbe.* am_lib.* am_dft.*
             
@@ -1039,62 +1039,80 @@ classdef am_mbe
             Fk = get_structure_factor(uc,recbas*k,hv);
             % exclude reflections with diffraction intensities below the value
             Fk2= abs(Fk).^2; Fk2 = Fk2./max(Fk2)*100; ex_ = Fk2>threshold;
-            % save structure
+            % save "full bragg spots" structure 
             bb_ = @(hv,recbas,k,Fk2) struct('units','tau=frac-recp; bas=nm',...
                 'hv',hv,'recbas',recbas,'nks',size(k,2),'k',k,'w',ones(1,size(k,2)),'Fk2',Fk2);
-            bbz = bb_(hv,recbas,k(:,ex_),Fk2(ex_));
+            fbs = bb_(hv,recbas,k(:,ex_),Fk2(ex_));
             
             % get symmetrically equivalent bragg spots
-            [iiz,i2b,b2i] = get_ibz(bbz,uc,'nomod');
-            iiz.i2b = i2b; iiz.b2i = b2i; iiz.Fk2 = iiz.Fk2(i2b);
-            bbz.i2b = i2b; bbz.b2i = b2i; 
+            % save "irreducible bragg spots" structure 
+            [ibs,i2b,b2i] = get_ibz(fbs,uc,'nomod,addinv');
+            ibs.i2b = i2b; ibs.b2i = b2i; ibs.Fk2 = ibs.Fk2(i2b);
+            fbs.i2b = i2b; fbs.b2i = b2i; 
 
             % print stuff
             fprintf(' (%.3f s) \n',toc);
-            tabulate_bragg(iiz,hv,threshold)
+            tabulate_bragg(ibs,hv,threshold)
             
-            function           tabulate_bragg(iiz,hv,threshold)
+            function           tabulate_bragg(ibs,hv,threshold)
                 fprintf('     %5s %5s %5s %10s %5s %10s\n','h','k','l','2th [deg]','w','Fhkl^2 [%]');
                 fprintf('     %5s %5s %5s %10s %5s %10s\n','-----','-----','-----','----------','-----','----------');
-                for j = 1:iiz.nks
+                for j = 1:ibs.nks
                     % exclude everything with peak height smaller than threshold
-                    if abs(iiz.Fk2(j))>threshold
-                        th2 = 2*am_mbe.get_th(norm(iiz.recbas*iiz.k(:,j)),hv);
-                        fprintf('     %5i %5i %5i %10.3f %5i %10.3f\n',iiz.k(:,j),th2,iiz.w(j),iiz.Fk2(j));
+                    if abs(ibs.Fk2(j))>threshold
+                        th2 = 2*am_mbe.get_th(norm(ibs.recbas*ibs.k(:,j)),hv);
+                        fprintf('     %5i %5i %5i %10.3f %5i %10.3f\n',ibs.k(:,j),th2,ibs.w(j),ibs.Fk2(j));
                     end
                 end
             end
         end
         
-        function [h]       = plot_iiz_1D(iiz)
-            import am_lib.* am_dft.*
+        function [h]       = plot_ibs_1D(ibs,labels,label_threshold,varargin)
+            import am_lib.* am_dft.* am_mbe.*
+            % set default maximum range in plot
+            max_th2_range = 110;
+            %
+            yscaler_ = @(x) x.^0.1;
+            yscaler_ = @(x) x;
+            % set threshold
+            if nargin<3 || isempty(label_threshold); label_threshold = 0; end
+            if nargin<2 || isempty(labels); labels = cell(1,numel(ibs)); end
             % number of bragg structures (one for each cell)
-            niizs=numel(iiz);
+            nibss=numel(ibs);
             % plot results
-            if niizs>1
-                for j = 1:niizs
-                    axes('position',[(0.1+0.87*(j-1)/niizs) 0.025 0.85/niizs 0.95]);
-                    h=plot_iiz_1D(iiz{j}); 
-                    if j~=1; set(gca,'YTickLabel',[]); ylabel(''); end
+            if nibss>1
+                clist = am_lib.color_(nibss).';
+                for j = 1:nibss
+                    ax(j) = axes('position',[0.025 (0.1+0.87*(j-1)/nibss) 0.95 0.85/nibss]);
+                    h=plot_ibs_1D(ibs(j),[],label_threshold,'color',clist(:,j)); 
+                    if j~=1; set(gca,'XTickLabel',[]); xlabel(''); end
+                    % set y axis label properties
+                    ax(j).YLabel.String=labels{j};
+                    ax(j).YLabel.Color=clist(:,j);
                 end
+                linkaxes(ax);
             else
                 % plot Bragg peaks
                 set(gcf,'color','w'); 
-                h=hggroup; label_threshold = 0;
-                for i = 1:iiz.nks
-                    th2 = 2*get_th(norm(iiz.recbas*iiz.kz),iiz.hv);
-                    line([0,iiz.Fk2(i)],[th2,th2],'Parent',h);
-                    if Fk2(i) > label_threshold
-                        text(Fk2(i),th2(i),sprintf('  [%i%i%i]  %.3f^\\circ  %i',...
-                            iiz.k(:,i),th2,iiz.w(i)),'Parent',h);
+                h=hggroup;
+                for i = 1:ibs.nks
+                    th2 = 2*get_th(norm(ibs.recbas*ibs.k(:,i)),ibs.hv);
+                    if th2 < max_th2_range
+                        line([th2,th2],[0,yscaler_(ibs.Fk2(i))],'linewidth',2,varargin{:},'Parent',h);
+                        if ibs.Fk2(i) > label_threshold
+                            % text(th2,ibs.Fk2(i),sprintf('  [%i%i%i]  %.3f^\\circ  %i', ibs.k(:,i),th2,ibs.w(i)),'Parent',h);
+                            text(th2,yscaler_(ibs.Fk2(i)),sprintf('  [%i%i%i]', ibs.k(:,i)),varargin{:},'Parent',h);
+                        end
                     end
                 end
-                box on; ylabel('2\theta [deg]'); ylim([5 115]); xlim([0 200]); %xlabel('intensity [a.u.]');
-                set(gca,'YTick',[0:10:130]); set(gca,'XTick',[]); grid on; set(gca,'YMinorGrid','on');
+                box on; xlabel('2\theta [deg]'); xlim([5 max_th2_range]); ylim([0 yscaler_(120)]); %xlabel('intensity [a.u.]');
+                set(gca,'XTick',[0:10:max_th2_range]); set(gca,'YTick',[]); grid on; set(gca,'YMinorGrid','on');
             end
+            H=findobj(gca,'Type','text');
+            set(H,'Rotation',60);
         end
         
-        function [h]       = plot_iiz_2D(iiz,varargin)
+        function [h]       = plot_ibs_2D(ibs)
             % [uc,~,~]=get_cell('material','SrTiO3');
             % [bragg] = get_bragg_poly_rings(uc,hv);
             % [h]     = plot_bragg_poly_rings(bragg,'linewidth',1.5);
@@ -1102,32 +1120,32 @@ classdef am_mbe
             % include edge points 
             N = 201; euler = exp(2i*pi*[0:N]/N);
             x = real(euler);y = imag(euler); h=hggroup;
-            for i = 1:iiz.nks
-                r = norm(iiz.recbas*iiz.k(:,i));
-                line(r*x,r*y,'color','r',varargin{:},'Parent',h)
-                text(0,r,sprintf('%i %i %i',iiz.k(:,i)),'HorizontalAlignment','center','BackgroundColor','w','EdgeColor','r','Parent',h,varargin{:});
+            for i = 1:ibs.nks
+                r = norm(ibs.recbas*ibs.k(:,i));
+                line(r*x,r*y,'color','r','linewidth',log10(ibs.Fk2(i)+1)/1.5+0.5,'Parent',h)
+                text(0,r,sprintf('%i %i %i',ibs.k(:,i)),'HorizontalAlignment','center','BackgroundColor','w','EdgeColor','r','Parent',h);
             end
         end
         
-        function [h]       = plot_bbz_2D(bbz,v1,v2,varargin)
+        function [h]       = plot_fbs_2D(fbs,v1,v2,varargin)
             import am_lib.*
             % see which points lie on the plane
-            for i = 1:bbz.nks
-                if eq_(det([v1(:),v2(:),bbz.k(:,i)]),0)
+            for i = 1:fbs.nks
+                if eq_(det([v1(:),v2(:),fbs.k(:,i)]),0)
                     ex_(i) = true;
                 else
                     ex_(i) = false;
                 end
             end
             % exclude points not on the line
-            bbz.k = bbz.k(:,ex_); bbz.Fk2 = bbz.Fk2(ex_); 
-            bbz.x = v1*bbz.recbas*bbz.k/norm(v1); bbz.y = v2*bbz.recbas*bbz.k/norm(v2);
-            bbz.b2i = bbz.b2i(ex_); bbz.w = bbz.w(ex_); bbz.nks = sum(ex_); 
+            fbs.k = fbs.k(:,ex_); fbs.Fk2 = fbs.Fk2(ex_); 
+            fbs.x = v1*fbs.recbas*fbs.k/norm(v1); fbs.y = v2*fbs.recbas*fbs.k/norm(v2);
+            fbs.b2i = fbs.b2i(ex_); fbs.w = fbs.w(ex_); fbs.nks = sum(ex_); 
             % plot points
             h=hggroup;
-            hold on; scatter(bbz.x,bbz.y,log10(bbz.Fk2*2)*50,'filled','linewidth',2,varargin{:},'Parent',h); hold off;
-            for i = 1:bbz.nks
-                text(bbz.x(i),bbz.y(i)+0.5,sprintf('%i %i %i',bbz.k(:,i)),'HorizontalAlignment','center','BackgroundColor','w','EdgeColor','b');
+            hold on; scatter(fbs.x,fbs.y,log10(fbs.Fk2+1)*50,'filled','linewidth',2,varargin{:},'Parent',h); hold off;
+            for i = 1:fbs.nks
+                text(fbs.x(i),fbs.y(i)+0.5,sprintf('%i %i %i',fbs.k(:,i)),'HorizontalAlignment','center','BackgroundColor','w','EdgeColor','b');
             end
         end
         
